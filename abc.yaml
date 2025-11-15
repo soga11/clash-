@@ -1,117 +1,67 @@
-# ========= 自用 Clash Meta 配置模板 =========
-# 完全兼容 override-hub 的结构
-# 你可以自由修改、扩展自己的 custom 分流
-
+### 参考自https://github.com/yyhhyyyyyy/selfproxy
+### 全局配置
 mixed-port: 7897
 allow-lan: true
 mode: rule
-log-level: info
+log-level: warning
 ipv6: false
 find-process-mode: strict
-
+### 如果使用的是裸核，需要将下面的注释去掉，方便ui界面的使用
+# external-controller: 0.0.0.0:9988
+# external-ui: ui
+# external-ui-url: 'https://testingcf.jsdelivr.net/gh/Zephyruso/zashboard@releases/latest/download/dist.zip'
+# secret: "114514yijiuyijiubayiling"
 profile:
   store-selected: true
   store-fake-ip: true
-
 unified-delay: true
 tcp-concurrent: true
 global-client-fingerprint: chrome
 
-# ===== DNS =====
+### DNS配置
 dns:
-  enable: true
-  listen: 0.0.0.0:53
-  ipv6: false
-  prefer-h3: true
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
-  use-hosts: true
-  use-system-hosts: true
-  nameserver:
-    - https://223.5.5.5/dns-query
-    - https://dns.pub/dns-query
-  fake-ip-filter:
-    - 'rule-set:fakeip-filter,private,cn'
+    enable: true
+    listen: 0.0.0.0:53
+    ipv6: false
+    prefer-h3: true
+    enhanced-mode: fake-ip
+    use-hosts: true
+    use-system-hosts: true
+    nameserver:
+        - https://223.5.5.5/dns-query
+        - https://dns.pub/dns-query
+        - https://dns.flymc.cc/dns-query
+    fake-ip-range: 198.18.0.1/16
+    fake-ip-filter: ['rule-set:fakeip-filter,trackerslist,private,cn']
+    nameserver-policy: {'rule-set:reject_non_ip,reject_domainset,reject_non_ip_drop,reject_non_ip_no_drop': [rcode://success]}
 
-# ===== Subscribe Provider =====
-proxy-providers:
-  sub:
-    type: http
-    url: "$proxy_provider_url$"
-    path: ./providers/sub.yaml
-    interval: 3600
-    health-check:
-      enable: true
-      url: https://www.gstatic.com/generate_204
-      interval: 600
+### 域名嗅探
+sniffer:
+    enable: true
+    sniff:
+        HTTP:
+            ports: [80, 8080-8880]
+            override-destination: true
+        TLS:
+            ports: [443, 8443]
+        QUIC:
+            ports: [443, 8443]
+    skip-domain:
+        - "Mijia Cloud"
+        - dlg.io.mi.com
+        - "+.push.apple.com"
 
-# ===== Proxy Groups =====
-proxy-groups:
-
-  - name: 手动切换
-    type: select
-    use: 
-      - sub
-
-  - name: 自动选择
-    type: url-test
-    use:
-      - sub
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 100
-
-  - name: 🚀 节点选择
-    type: select
-    proxies:
-      - 自动选择
-      - 手动切换
-      - DIRECT
-
-  - name: 🎯 全球直连
-    type: select
-    proxies:
-      - DIRECT
-      - 🚀 节点选择
-
-  - name: 🛑 广告拦截
-    type: select
-    proxies:
-      - REJECT
-      - DIRECT
-
-  - name: 🌍 国外媒体
-    type: select
-    proxies:
-      - 🚀 节点选择
-      - DIRECT
-
-  - name: AI服务
-    type: select
-    proxies:
-      - 🚀 节点选择
-      - DIRECT
-
-  - name: 🐟 漏网之鱼
-    type: select
-    proxies:
-      - 🚀 节点选择
-      - DIRECT
-
-# ===== Rules =====
-rules:
-  # 来自你的 [custom]
-  - DOMAIN-SUFFIX,cn,🎯 全球直连
-  - DOMAIN-KEYWORD,baidu,🎯 全球直连
-  - GEOIP,CN,🎯 全球直连
-  - GEOIP,LAN,🎯 全球直连
-
-  - DOMAIN-SUFFIX,googlesyndication.com,🛑 广告拦截
-  - DOMAIN-SUFFIX,doubleclick.net,🛑 广告拦截
-
-  - DOMAIN-SUFFIX,google.com,🚀 节点选择
-  - DOMAIN-SUFFIX,youtube.com,🚀 节点选择
-  - DOMAIN-SUFFIX,github.com,🚀 节点选择
-  - DOMAIN-SUFFIX,openai.com,AI服务
-
-  - MATCH,🐟 漏网之鱼
+### Tunnel配置
+tun:
+  enable: false
+  stack: system
+  device: Ethernet 99
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - any:53
+    - tcp://any:53
+  strict-route: true
+  mtu: 1500
+  # 如果有使用zerotier或者headscale等，需要自己配置排除自己的网段
+  # route-exclude-address: ["192.168.110.0/24"]
