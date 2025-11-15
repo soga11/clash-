@@ -1,0 +1,117 @@
+# ========= 自用 Clash Meta 配置模板 =========
+# 完全兼容 override-hub 的结构
+# 你可以自由修改、扩展自己的 custom 分流
+
+mixed-port: 7897
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+find-process-mode: strict
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+unified-delay: true
+tcp-concurrent: true
+global-client-fingerprint: chrome
+
+# ===== DNS =====
+dns:
+  enable: true
+  listen: 0.0.0.0:53
+  ipv6: false
+  prefer-h3: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  use-hosts: true
+  use-system-hosts: true
+  nameserver:
+    - https://223.5.5.5/dns-query
+    - https://dns.pub/dns-query
+  fake-ip-filter:
+    - 'rule-set:fakeip-filter,private,cn'
+
+# ===== Subscribe Provider =====
+proxy-providers:
+  sub:
+    type: http
+    url: "$proxy_provider_url$"
+    path: ./providers/sub.yaml
+    interval: 3600
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 600
+
+# ===== Proxy Groups =====
+proxy-groups:
+
+  - name: 手动切换
+    type: select
+    use: 
+      - sub
+
+  - name: 自动选择
+    type: url-test
+    use:
+      - sub
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 100
+
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - 自动选择
+      - 手动切换
+      - DIRECT
+
+  - name: 🎯 全球直连
+    type: select
+    proxies:
+      - DIRECT
+      - 🚀 节点选择
+
+  - name: 🛑 广告拦截
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT
+
+  - name: 🌍 国外媒体
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - DIRECT
+
+  - name: AI服务
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - DIRECT
+
+  - name: 🐟 漏网之鱼
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - DIRECT
+
+# ===== Rules =====
+rules:
+  # 来自你的 [custom]
+  - DOMAIN-SUFFIX,cn,🎯 全球直连
+  - DOMAIN-KEYWORD,baidu,🎯 全球直连
+  - GEOIP,CN,🎯 全球直连
+  - GEOIP,LAN,🎯 全球直连
+
+  - DOMAIN-SUFFIX,googlesyndication.com,🛑 广告拦截
+  - DOMAIN-SUFFIX,doubleclick.net,🛑 广告拦截
+
+  - DOMAIN-SUFFIX,google.com,🚀 节点选择
+  - DOMAIN-SUFFIX,youtube.com,🚀 节点选择
+  - DOMAIN-SUFFIX,github.com,🚀 节点选择
+  - DOMAIN-SUFFIX,openai.com,AI服务
+
+  - MATCH,🐟 漏网之鱼
