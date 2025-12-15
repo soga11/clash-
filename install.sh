@@ -13,7 +13,6 @@ WHITE_BG='\033[47;30m'
 YELLOW_BG='\033[43;30m'
 NORMAL='\033[0m'
 
-# 检查是否为 root 用户
 if [[ $EUID -ne 0 ]]; then
   echo -e "${RED_BG}需要 root 权限运行此脚本${NORMAL}"
   echo "请使用以下命令之一："
@@ -22,7 +21,6 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-# 检测 CPU 架构
 echo -e "${GREEN_BG}[系统检测] 正在检测系统架构...${NORMAL}"
 cpu_arch=$(uname -m)
 case "$cpu_arch" in
@@ -45,7 +43,6 @@ case "$cpu_arch" in
     ;;
 esac
 
-# 检测 glibc 版本（决定使用 gnu 还是 musl）
 echo -e "${GREEN_BG}[系统检测] 正在检测 libc 类型...${NORMAL}"
 if ldd --version 2>&1 | grep -q 'musl'; then
   libc_type="musl"
@@ -66,7 +63,6 @@ fi
 
 arch_full="${arch}-${libc_type}"
 
-# 获取服务器 IP（支持 IPv4/IPv6）
 echo -e "${GREEN_BG}[网络检测] 正在获取服务器 IP...${NORMAL}"
 if [ -z "$3" ] || [ "$3" = "auto" ]; then
   ip=$(curl -s4 --max-time 5 https://api.ipify.org)
@@ -81,7 +77,6 @@ if [ -z "$3" ] || [ "$3" = "auto" ]; then
     read -p "请手动输入服务器 IP: " ip
   fi
   
-  # IPv6 地址需要加方括号
   if echo "$ip" | grep -q ':'; then
     ip_display="[$ip]"
     echo -e "${GREEN_BG}检测到 IPv6 地址: ${ip_display}${NORMAL}"
@@ -95,7 +90,6 @@ else
   echo -e "${GREEN_BG}使用指定 IP: ${ip_display}${NORMAL}"
 fi
 
-# URL 编码函数
 urlencode() {
     local LANG=C
     local input
@@ -116,7 +110,6 @@ urlencode() {
     echo
 }
 
-# 检测并安装依赖
 install_packages() {
   echo -e "${GREEN_BG}[依赖安装] 正在安装必要依赖...${NORMAL}"
   if command -v apk &> /dev/null; then
@@ -136,7 +129,6 @@ install_packages() {
   fi
 }
 
-# 安装 GNU grep（如果是 BusyBox）
 is_busybox_grep() {
   grep --version 2>&1 | grep -q BusyBox
 }
@@ -152,7 +144,6 @@ if is_busybox_grep; then
   fi
 fi
 
-# 检查并安装依赖工具
 echo -e "${GREEN_BG}[依赖检查] 检查必要工具...${NORMAL}"
 missing_tools=()
 for tool in curl jq tar openssl wget; do
@@ -168,7 +159,6 @@ else
   echo -e "${GREEN_BG}所有依赖已安装${NORMAL}"
 fi
 
-# 获取 Shoes 最新版本
 get_latest_version() {
   echo -e "${GREEN_BG}[版本检测] 正在获取 Shoes 最新版本...${NORMAL}"
   latest_version=$(curl -s --max-time 10 "https://api.github.com/repos/cfal/shoes/releases/latest" | jq -r .tag_name 2>/dev/null)
@@ -181,18 +171,15 @@ get_latest_version() {
   fi
 }
 
-# 下载并安装 Shoes
 download_shoes() {
   echo -e "${GREEN_BG}[安装 Shoes] 开始下载...${NORMAL}"
   mkdir -p /opt/shoes-hy2/
   
-  # 构建下载 URL
   download_url="https://github.com/cfal/shoes/releases/download/${version}/shoes-${arch_full}.tar.gz"
   
   echo -e "${GREEN_BG}下载地址: ${download_url}${NORMAL}"
   echo -e "${GREEN_BG}架构: ${arch_full}${NORMAL}"
   
-  # 尝试下载
   if curl -sL --max-time 120 "$download_url" -o /tmp/shoes.tar.gz; then
     echo -e "${GREEN_BG}下载成功，正在解压...${NORMAL}"
     
@@ -217,7 +204,6 @@ download_shoes() {
   fi
 }
 
-# 设置版本（参数2）
 if [ -z "$2" ] || [ "$2" = "auto" ]; then
   version=$(get_latest_version)
 else
@@ -225,26 +211,19 @@ else
   echo -e "${GREEN_BG}[版本设置] 使用指定版本: ${version}${NORMAL}"
 fi
 
-# 检查已安装版本
 if [[ -x "/opt/shoes-hy2/shoes" ]]; then
     installed_version=$(/opt/shoes-hy2/shoes --version 2>&1 | grep -oP 'v\d+\.\d+\.\d+' || echo "unknown")
     if [[ "$installed_version" == "$version" ]]; then
         echo -e "${GREEN_BG}[版本检查] Shoes ${version} 已安装，跳过下载${NORMAL}"
     else
         echo -e "${YELLOW_BG}[版本检查] 已安装 ${installed_version}，目标版本 ${version}${NORMAL}"
-        read -p "是否更新到 ${version}? (y/N): " confirm
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-            download_shoes
-        else
-            echo -e "${GREEN_BG}保持当前版本 ${installed_version}${NORMAL}"
-        fi
+        download_shoes
     fi
 else
     echo -e "${GREEN_BG}[安装检查] Shoes 未安装，开始下载...${NORMAL}"
     download_shoes
 fi
 
-# 生成配置
 if [ -z "$1" ] || [ "$1" = "auto" ]; then
   port=52015
   echo -e "${GREEN_BG}[端口设置] 使用默认端口: ${port}${NORMAL}"
@@ -253,21 +232,12 @@ else
   echo -e "${GREEN_BG}[端口设置] 使用指定端口: ${port}${NORMAL}"
 fi
 
-# 检查端口是否已被占用
 if ss -tuln 2>/dev/null | grep -q ":${port} " || netstat -tuln 2>/dev/null | grep -q ":${port} "; then
-  echo -e "${RED_BG}端口 ${port} 已被占用${NORMAL}"
-  echo "当前监听该端口的进程:"
-  ss -tulnp 2>/dev/null | grep ":${port} " || netstat -tulnp 2>/dev/null | grep ":${port} "
-  read -p "是否继续安装? (y/N): " confirm
-  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    echo "安装已取消"
-    exit 1
-  fi
+  echo -e "${YELLOW_BG}端口 ${port} 已被占用，继续安装...${NORMAL}"
 fi
 
 mkdir -p /opt/shoes-hy2/$port
 
-# 生成随机密码（或使用固定密码）
 if [ -z "$4" ] || [ "$4" = "auto" ]; then
   password="Aq$(date +%s | sha256sum | base64 | head -c 8)!"
   echo -e "${GREEN_BG}[密码生成] 已生成随机密码${NORMAL}"
@@ -276,7 +246,6 @@ else
   echo -e "${GREEN_BG}[密码设置] 使用指定密码${NORMAL}"
 fi
 
-# 生成自签名证书
 echo -e "${GREEN_BG}[证书生成] 正在生成自签名 TLS 证书...${NORMAL}"
 cat <<EOF > /opt/shoes-hy2/$port/openssl.conf
 [ req ]
@@ -313,7 +282,6 @@ chmod 600 /opt/shoes-hy2/$port/key.pem
 chmod 644 /opt/shoes-hy2/$port/cert.pem
 rm -f /opt/shoes-hy2/$port/openssl.conf
 
-# 打印证书信息
 cert_fingerprint=$(openssl x509 -noout -fingerprint -sha256 -in /opt/shoes-hy2/$port/cert.pem 2>/dev/null | cut -d'=' -f2)
 
 echo ""
@@ -327,13 +295,7 @@ echo -e "${GREEN_BG}证书指纹${NORMAL}: $cert_fingerprint"
 echo -e "${WHITE_BG}========================================${NORMAL}"
 echo ""
 
-# 创建 Shoes 配置文件
 cat <<EOF > /opt/shoes-hy2/$port/config.yaml
-# Shoes Hysteria2 服务器配置
-# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 端口: $port
-# 版本: $version
-
 - address: 0.0.0.0:${port}
   transport: quic
   quic_settings:
@@ -348,7 +310,6 @@ EOF
 
 echo -e "${GREEN_BG}[配置文件] 已生成: /opt/shoes-hy2/$port/config.yaml${NORMAL}"
 
-# 创建 systemd 服务
 echo -e "${GREEN_BG}[服务安装] 正在创建系统服务...${NORMAL}"
 init_system=$(cat /proc/1/comm 2>/dev/null || echo "unknown")
 
@@ -389,60 +350,16 @@ EOF
   
   echo ""
   echo -e "${WHITE_BG}========== 管理命令 ==========${NORMAL}"
-  echo -e "查看状态: ${GREEN_BG}systemctl status shoes-hy2-${port}${NORMAL}"
-  echo -e "查看日志: ${GREEN_BG}journalctl -u shoes-hy2-${port} -f${NORMAL}"
-  echo -e "重启服务: ${GREEN_BG}systemctl restart shoes-hy2-${port}${NORMAL}"
-  echo -e "停止服务: ${GREEN_BG}systemctl stop shoes-hy2-${port}${NORMAL}"
-  echo -e "卸载服务: ${GREEN_BG}systemctl disable --now shoes-hy2-${port} && rm /etc/systemd/system/shoes-hy2-${port}.service && rm -rf /opt/shoes-hy2/$port${NORMAL}"
+  echo -e "查看状态: systemctl status shoes-hy2-${port}"
+  echo -e "查看日志: journalctl -u shoes-hy2-${port} -f"
+  echo -e "重启服务: systemctl restart shoes-hy2-${port}"
+  echo -e "停止服务: systemctl stop shoes-hy2-${port}"
+  echo -e "卸载: systemctl disable --now shoes-hy2-${port} && rm /etc/systemd/system/shoes-hy2-${port}.service && rm -rf /opt/shoes-hy2/$port"
   echo -e "${WHITE_BG}=============================${NORMAL}"
-
-elif [[ "$init_system" == "init" ]] || command -v rc-update &>/dev/null; then
-  cat <<EOF > /etc/init.d/shoes-hy2-$port
-#!/sbin/openrc-run
-
-name="Shoes Hysteria2 on :$port"
-description="Shoes Hysteria2 server on port $port"
-command="/opt/shoes-hy2/shoes"
-command_args="/opt/shoes-hy2/$port/config.yaml"
-pidfile="/var/run/shoes-hy2-$port.pid"
-logfile="/var/log/shoes-hy2-$port.log"
-
-depend() {
-    need net
-    after firewall
-}
-
-start() {
-    ebegin "Starting \$name"
-    start-stop-daemon --start --background --make-pidfile --pidfile \$pidfile \\
-      --stdout \$logfile --stderr \$logfile --exec \$command -- \$command_args
-    eend \$?
-}
-
-stop() {
-    ebegin "Stopping \$name"
-    start-stop-daemon --stop --pidfile \$pidfile
-    eend \$?
-}
-EOF
-
-  chmod +x /etc/init.d/shoes-hy2-${port}
-  rc-update add shoes-hy2-${port} default 2>/dev/null
-  rc-service shoes-hy2-${port} start
-  
-  echo -e "${GREEN_BG}[服务状态] OpenRC 服务已启动${NORMAL}"
-  echo -e "${WHITE_BG}卸载: rc-update del shoes-hy2-${port} && rc-service shoes-hy2-${port} stop && rm /etc/init.d/shoes-hy2-${port} && rm -rf /opt/shoes-hy2/$port${NORMAL}"
-
-else
-  echo -e "${YELLOW_BG}不支持的 init 系统: $init_system${NORMAL}"
-  echo -e "${WHITE_BG}请手动运行: /opt/shoes-hy2/shoes /opt/shoes-hy2/$port/config.yaml &${NORMAL}"
 fi
 
-# 生成 Hysteria2 分享链接
-# 格式: hysteria2://password@server:port/?insecure=1&sni=www.gov.hk#name
 hy2_url="hysteria2://$(urlencode "$password")@${ip_display//[\[\]]/}:$port/?insecure=1&sni=www.gov.hk#$(urlencode "Shoes-HY2-$port")"
 
-# 生成客户端 JSON 配置（sing-box 格式）
 json_config=$(cat <<EOF
 {
   "type": "hysteria2",
@@ -460,7 +377,6 @@ json_config=$(cat <<EOF
 EOF
 )
 
-# 生成 Clash Meta 配置
 clash_config=$(cat <<EOF
 proxies:
   - name: "Shoes-HY2-$port"
@@ -494,9 +410,6 @@ echo -e "${YELLOW_BG}客户端配置注意事项:${NORMAL}"
 echo "1. 使用自签名证书，需开启 '跳过证书验证'"
 echo "2. SNI 设置为: www.gov.hk"
 echo "3. ALPN 设置为: h3"
-echo "4. 如需正式证书，运行以下命令:"
-echo "   curl https://get.acme.sh | sh"
-echo "   ~/.acme.sh/acme.sh --issue -d yourdomain.com --standalone"
 echo ""
 echo -e "${GREEN_BG}防火墙配置 (如需要):${NORMAL}"
 echo "  ufw allow $port/udp"
