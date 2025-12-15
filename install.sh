@@ -7,7 +7,6 @@
 # 日期: 2025-12-15
 #================================================================
 
-# ======= 颜色代码 =======
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -20,13 +19,11 @@ SHOES_CONF_DIR="/etc/shoes"
 SHOES_CONF_FILE="${SHOES_CONF_DIR}/hy2-config.yaml"
 SHOES_LINK_FILE="${SHOES_CONF_DIR}/hy2-link.txt"
 
-# ======= 检查 root 权限 =======
 if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}必须使用 root 权限运行此脚本！${RESET}"
     exit 1
 fi
 
-# ======= 获取 glibc 版本 =======
 get_glibc_version() {
     if ldd --version 2>&1 | grep -q 'musl'; then
         GLIBC_VERSION="musl"
@@ -46,7 +43,6 @@ get_glibc_version() {
     fi
 }
 
-# ======= CPU 架构检测 =======
 check_arch() {
     arch=$(uname -m)
     case "$arch" in
@@ -72,11 +68,9 @@ check_arch() {
     esac
 }
 
-# ======= 获取最新 Shoes 版本 =======
 get_latest_version() {
     echo -e "${CYAN}正在获取 Shoes 最新版本...${RESET}"
     LATEST_VER=$(curl -s --max-time 10 https://api.github.com/repos/cfal/shoes/releases/latest | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -1)
-    
     if [[ -z "$LATEST_VER" ]]; then
         echo -e "${YELLOW}无法从 GitHub 获取版本，使用默认版本 0.2.2${RESET}"
         LATEST_VER="0.2.2"
@@ -85,7 +79,6 @@ get_latest_version() {
     fi
 }
 
-# ======= 测试 Shoes 二进制 =======
 test_shoes_binary() {
     if ${SHOES_BIN} generate-reality-keypair >/dev/null 2>&1; then
         return 0
@@ -94,13 +87,10 @@ test_shoes_binary() {
     fi
 }
 
-# ======= 下载并安装 Shoes =======
 download_shoes() {
     get_glibc_version
     check_arch
     get_latest_version
-
-    # 判断使用 GNU 还是 MUSL
     if [[ "$GLIBC_VERSION" == "musl" ]] || (( GLIBC_MAJOR < 2 )) || (( GLIBC_MAJOR == 2 && GLIBC_MINOR < 17 )); then
         echo -e "${YELLOW}你的 glibc 版本低于 2.17 或使用 musl，将使用 MUSL 版本${RESET}"
         DOWNLOAD_FILE=${MUSL_FILE}
@@ -110,20 +100,14 @@ download_shoes() {
         DOWNLOAD_FILE=${GNU_FILE}
         DOWNLOAD_TYPE="GNU"
     fi
-
     mkdir -p /tmp/shoesdl
     cd /tmp/shoesdl
-
     DOWNLOAD_URL="https://github.com/cfal/shoes/releases/download/v${LATEST_VER}/${DOWNLOAD_FILE}"
-
     echo -e "${CYAN}下载 ${DOWNLOAD_TYPE} 版本: ${YELLOW}${DOWNLOAD_URL}${RESET}"
-    
     if wget -q --show-progress -O shoes.tar.gz "$DOWNLOAD_URL" 2>/dev/null || curl -# -L -o shoes.tar.gz "$DOWNLOAD_URL" 2>/dev/null; then
         echo -e "${GREEN}下载成功${RESET}"
     else
         echo -e "${RED}${DOWNLOAD_TYPE} 下载失败！${RESET}"
-        
-        # GNU 失败则尝试 MUSL
         if [[ "$DOWNLOAD_TYPE" == "GNU" ]]; then
             echo -e "${YELLOW}尝试改为下载 MUSL 版本...${RESET}"
             DOWNLOAD_URL="https://github.com/cfal/shoes/releases/download/v${LATEST_VER}/${MUSL_FILE}"
@@ -137,12 +121,9 @@ download_shoes() {
             exit 1
         fi
     fi
-
     tar -xzf shoes.tar.gz
     mv shoes ${SHOES_BIN}
     chmod +x ${SHOES_BIN}
-
-    # 测试运行
     if test_shoes_binary; then
         echo -e "${GREEN}Shoes (${DOWNLOAD_TYPE}) 可正常运行！${RESET}"
     else
@@ -153,7 +134,6 @@ download_shoes() {
             tar -xzf shoes.tar.gz
             mv shoes ${SHOES_BIN}
             chmod +x ${SHOES_BIN}
-
             if test_shoes_binary; then
                 echo -e "${GREEN}MUSL 版本运行成功！${RESET}"
             else
@@ -165,44 +145,25 @@ download_shoes() {
             exit 1
         fi
     fi
-
     cd - >/dev/null
     rm -rf /tmp/shoesdl
 }
 
-# ======= 安装 Hysteria2 =======
 install_hy2() {
     echo -e "${CYAN}开始安装 Shoes Hysteria2...${RESET}"
-
-    # 检查是否已安装
     if command -v shoes >/dev/null 2>&1; then
         echo -e "${YELLOW}Shoes 已安装，跳过下载${RESET}"
     else
         download_shoes
     fi
-
     mkdir -p ${SHOES_CONF_DIR}
-
-    # 生成配置
     PORT=$(shuf -i 20000-60000 -n 1)
     PASSWORD="Aq$(openssl rand -hex 6)"
-    
     echo -e "${CYAN}正在生成自签名证书...${RESET}"
-    # 生成自签名证书
-    openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
-        -keyout ${SHOES_CONF_DIR}/hy2-key.pem \
-        -out ${SHOES_CONF_DIR}/hy2-cert.pem \
-        -days 3650 -subj "/CN=www.gov.hk" 2>/dev/null
-
+    openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) -keyout ${SHOES_CONF_DIR}/hy2-key.pem -out ${SHOES_CONF_DIR}/hy2-cert.pem -days 3650 -subj "/CN=www.gov.hk" 2>/dev/null
     chmod 600 ${SHOES_CONF_DIR}/hy2-key.pem
     chmod 644 ${SHOES_CONF_DIR}/hy2-cert.pem
-
-    # 创建 Hysteria2 配置文件
 cat > ${SHOES_CONF_FILE} <<EOF
-# Shoes Hysteria2 服务器配置
-# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 端口: ${PORT}
-
 - address: 0.0.0.0:${PORT}
   transport: quic
   quic_settings:
@@ -214,8 +175,6 @@ cat > ${SHOES_CONF_FILE} <<EOF
     password: "${PASSWORD}"
     udp_enabled: true
 EOF
-
-    # 创建 systemd 服务
 cat > /etc/systemd/system/shoes.service <<EOF
 [Unit]
 Description=Shoes Hysteria2 Proxy Server
@@ -236,27 +195,18 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-
     systemctl daemon-reload
     systemctl enable shoes
     systemctl restart shoes
-
     sleep 2
-
-    # 获取服务器 IP
     HOST_IP=$(curl -s4 --max-time 5 https://api.ipify.org)
     if [[ -z "$HOST_IP" ]]; then
         HOST_IP=$(curl -s --max-time 5 http://www.cloudflare.com/cdn-cgi/trace | grep -oP '(?<=ip=).*')
     fi
-    
     COUNTRY=$(curl -s --max-time 5 http://ipinfo.io/${HOST_IP}/country 2>/dev/null || echo "XX")
-
-    # 生成分享链接
     ENCODED_PASSWORD=$(echo -n "$PASSWORD" | jq -sRr @uri)
     HY2_URL="hysteria2://${ENCODED_PASSWORD}@${HOST_IP}:${PORT}/?insecure=1&sni=www.gov.hk#${COUNTRY}-Shoes-HY2"
-
-    # 生成 JSON 配置
-    JSON_CONFIG=$(cat <<EOF
+    JSON_CONFIG=$(cat <<JSONEOF
 {
   "type": "hysteria2",
   "tag": "shoes-hy2",
@@ -270,11 +220,9 @@ EOF
     "alpn": ["h3"]
   }
 }
-EOF
+JSONEOF
 )
-
-    # 生成 Clash Meta 配置
-    CLASH_CONFIG=$(cat <<EOF
+    CLASH_CONFIG=$(cat <<CLASHEOF
 proxies:
   - name: "Shoes-HY2-${COUNTRY}"
     type: hysteria2
@@ -285,11 +233,9 @@ proxies:
     sni: www.gov.hk
     alpn:
       - h3
-EOF
+CLASHEOF
 )
-
-    # 保存链接到文件
-cat > ${SHOES_LINK_FILE} <<EOF
+cat > ${SHOES_LINK_FILE} <<LINKEOF
 ========================================
 Shoes Hysteria2 服务器信息
 ========================================
@@ -313,8 +259,7 @@ ${CLASH_CONFIG}
 2. SNI 设置为: www.gov.hk
 3. ALPN 设置为: h3
 ========================================
-EOF
-
+LINKEOF
     echo ""
     echo -e "${GREEN}========================================${RESET}"
     echo -e "${GREEN}      Shoes Hysteria2 安装完成！${RESET}"
@@ -324,21 +269,17 @@ EOF
     echo ""
 }
 
-# ======= 卸载 Hysteria2 =======
 uninstall_hy2() {
     echo -e "${YELLOW}正在卸载 Shoes Hysteria2...${RESET}"
-    
     systemctl stop shoes 2>/dev/null
     systemctl disable shoes 2>/dev/null
     rm -f /etc/systemd/system/shoes.service
     rm -rf ${SHOES_CONF_DIR}
     rm -f ${SHOES_BIN}
     systemctl daemon-reload
-
     echo -e "${GREEN}Shoes Hysteria2 已完全卸载${RESET}"
 }
 
-# ======= 状态检测 =======
 check_installed() { 
     command -v shoes >/dev/null 2>&1 && [[ -f ${SHOES_CONF_FILE} ]]
 }
@@ -347,7 +288,6 @@ check_running() {
     systemctl is-active --quiet shoes 
 }
 
-# ======= 查看配置 =======
 view_config() {
     if [[ -f ${SHOES_LINK_FILE} ]]; then
         cat ${SHOES_LINK_FILE}
@@ -356,26 +296,22 @@ view_config() {
     fi
 }
 
-# ======= 菜单 =======
 show_menu() {
     clear
     echo -e "${CYAN}========================================${RESET}"
     echo -e "${CYAN}    Shoes Hysteria2 管理工具${RESET}"
     echo -e "${CYAN}========================================${RESET}"
     echo ""
-
     if check_installed; then
         echo -e "安装状态: ${GREEN}已安装${RESET}"
     else
         echo -e "安装状态: ${RED}未安装${RESET}"
     fi
-
     if check_running; then
         echo -e "运行状态: ${GREEN}运行中${RESET}"
     else
         echo -e "运行状态: ${RED}未运行${RESET}"
     fi
-
     echo ""
     echo -e "${CYAN}========================================${RESET}"
     echo "1. 安装 Hysteria2 服务"
@@ -389,11 +325,9 @@ show_menu() {
     echo "0. 退出"
     echo -e "${CYAN}========================================${RESET}"
     echo ""
-
     read -p "请输入选项 [0-8]: " choice
 }
 
-# ======= 主循环 =======
 while true; do
     show_menu
     case "$choice" in
@@ -447,7 +381,6 @@ while true; do
             echo -e "${RED}无效选项！${RESET}"
             ;;
     esac
-    
     echo ""
     read -p "按 Enter 继续..."
 done
