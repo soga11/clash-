@@ -1,0 +1,19 @@
+# 中国移动 DNS
+IP-CIDR,211.138.240.100/32,no-resolve
+IP-CIDR,211.138.245.180/32,no-resolve
+IP-CIDR6,2409:805c:2000:3000::1000/128,no-resolve
+IP-CIDR6,2409:805c:2000:3001::1000/128,no-resolve
+
+# 阿里云 DNS
+IP-CIDR,223.5.5.5/32,no-resolve
+IP-CIDR,223.6.6.6/32,no-resolve
+
+# 腾讯 DNS
+IP-CIDR,119.29.29.29/32,no-resolve
+IP-CIDR,119.28.28.28/32,no-resolve
+
+# 百度 DNS
+IP-CIDR,180.76.76.76/32,no-resolve
+
+# 114 DNS
+IP-CIDR,114.114.114.114/32,no-resolve
