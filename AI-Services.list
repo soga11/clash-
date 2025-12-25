@@ -97,3 +97,9 @@ DOMAIN-SUFFIX,runwayml.com
 DOMAIN-SUFFIX,runway.com
 DOMAIN-SUFFIX,app.runwayml.com
 DOMAIN-KEYWORD,runway
+
+# Meta AI
+DOMAIN-SUFFIX,meta.ai
+DOMAIN,ai.meta.com
+DOMAIN,www.meta.ai
+DOMAIN-KEYWORD,meta-ai
