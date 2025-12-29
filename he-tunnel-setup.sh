@@ -1,11 +1,16 @@
 #!/bin/bash
 
 #####################################################################
-# HE IPv6 隧道配置脚本 - 优化版
-# 默认回车=确认，更快速的安装体验
+# HE IPv6 隧道配置脚本 - 快速安装版
+# 支持 curl | bash 直接运行
 #####################################################################
 
 set -e
+
+# 检测是否通过管道运行，重定向到 /dev/tty 以支持交互
+if [ ! -t 0 ]; then
+    exec < /dev/tty
+fi
 
 # 颜色定义
 RED='\033[0;31m'
@@ -118,14 +123,14 @@ show_menu() {
     echo -e "${CYAN}════════════════════════════════════════${NC}"
     echo -e "${YELLOW}请选择操作：${NC}"
     echo ""
-    echo "  ${GREEN}1${NC}. 获取系统信息"
-    echo "  ${GREEN}2${NC}. 输入 HE 隧道信息"
-    echo "  ${GREEN}3${NC}. 禁用原生 IPv6"
-    echo "  ${GREEN}4${NC}. 安装 HE 隧道"
-    echo "  ${GREEN}5${NC}. 验证配置"
+    echo -e "  ${GREEN}1${NC}. 获取系统信息"
+    echo -e "  ${GREEN}2${NC}. 输入 HE 隧道信息"
+    echo -e "  ${GREEN}3${NC}. 禁用原生 IPv6"
+    echo -e "  ${GREEN}4${NC}. 安装 HE 隧道"
+    echo -e "  ${GREEN}5${NC}. 验证配置"
     echo ""
-    echo "  ${GREEN}9${NC}. 一键完整安装（推荐）"
-    echo "  ${RED}0${NC}. 退出脚本"
+    echo -e "  ${GREEN}9${NC}. 一键完整安装（推荐）"
+    echo -e "  ${RED}0${NC}. 退出脚本"
     echo ""
     echo -e "${CYAN}════════════════════════════════════════${NC}"
     echo ""
