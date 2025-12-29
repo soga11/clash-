@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #####################################################################
-# HE IPv6 隧道自动配置脚本（完全交互式版本）
+# HE IPv6 隧道自动配置脚本（完全交互式版本 v2）
 # 适用于：已有原生 IPv6 的 VPS，需要用 HE 隧道替代
 # 支持：Ubuntu 20.04/22.04, Debian 11/12
 #####################################################################
@@ -95,7 +95,9 @@ echo "  1. Server IPv4 Address    (HE 服务器地址)"
 echo "  2. Client IPv6 Address    (你的隧道 IPv6)"
 echo "  3. Routed /64             (分配的 IPv6 子网)"
 echo ""
-read -p "$(echo -e ${CYAN}准备好了吗？按回车继续...${NC})" 
+echo -e "${YELLOW}提示：请提前复制好这些信息，避免输入错误${NC}"
+echo ""
+read -p "准备好了吗？按回车继续..." dummy
 
 # ========================================
 # 步骤 1：确认本机 IPv4
@@ -108,17 +110,20 @@ echo ""
 
 if [[ -n "$LOCAL_IPV4" ]]; then
     echo -e "检测到本机 IPv4: ${GREEN}${LOCAL_IPV4}${NC}"
-    read -p "$(echo -e ${CYAN}直接使用此地址？[Y/n]:${NC}) " use_detected
-    if [[ $use_detected =~ ^[Nn]$ ]]; then
-        read -p "$(echo -e ${CYAN}请输入本机 IPv4 地址:${NC}) " LOCAL_IPV4
-        log_success "已设置 IPv4: ${LOCAL_IPV4}"
-    else
-        log_success "使用检测到的 IPv4: ${LOCAL_IPV4}"
+    echo ""
+    read -p "直接使用此地址？(直接回车=是, 输入n=手动输入): " use_detected
+    if [[ "$use_detected" == "n" || "$use_detected" == "N" ]]; then
+        echo ""
+        read -p "请输入本机 IPv4 地址: " custom_ipv4
+        if [[ -n "$custom_ipv4" ]]; then
+            LOCAL_IPV4="$custom_ipv4"
+        fi
     fi
 else
-    read -p "$(echo -e ${CYAN}请输入本机 IPv4 地址:${NC}) " LOCAL_IPV4
-    log_success "已设置 IPv4: ${LOCAL_IPV4}"
+    read -p "请输入本机 IPv4 地址: " LOCAL_IPV4
 fi
+
+log_success "本机 IPv4: ${LOCAL_IPV4}"
 
 # ========================================
 # 步骤 2：输入 Server IPv4
@@ -128,15 +133,25 @@ echo -e "${CYAN}═════════════════════�
 echo -e "${YELLOW}  步骤 2/4: HE 服务器 IPv4${NC}"
 echo -e "${CYAN}════════════════════════════════════════${NC}"
 echo ""
-echo "从 tunnelbroker.net 复制 'Server IPv4 Address'"
+echo "从 tunnelbroker.net 隧道页面复制"
+echo "字段名: 'Server IPv4 Address'"
+echo ""
 echo -e "${BLUE}示例: 216.66.90.30${NC}"
 echo ""
-read -p "$(echo -e ${CYAN}请输入 Server IPv4 Address:${NC}) " HE_SERVER
-while [[ -z "$HE_SERVER" ]]; do
-    log_error "地址不能为空"
-    read -p "$(echo -e ${CYAN}请输入 Server IPv4 Address:${NC}) " HE_SERVER
+
+while true; do
+    read -p "请粘贴 Server IPv4 Address: " HE_SERVER
+    # 移除可能的空格
+    HE_SERVER=$(echo "$HE_SERVER" | tr -d ' ')
+    
+    if [[ -n "$HE_SERVER" && "$HE_SERVER" != "done" ]]; then
+        break
+    else
+        log_error "输入无效，请重新输入"
+    fi
 done
-log_success "已设置 Server IPv4: ${HE_SERVER}"
+
+log_success "Server IPv4: ${HE_SERVER}"
 
 # ========================================
 # 步骤 3：输入 Client IPv6
@@ -146,15 +161,25 @@ echo -e "${CYAN}═════════════════════�
 echo -e "${YELLOW}  步骤 3/4: Client IPv6 地址${NC}"
 echo -e "${CYAN}════════════════════════════════════════${NC}"
 echo ""
-echo "从 tunnelbroker.net 复制 'Client IPv6 Address'"
+echo "从 tunnelbroker.net 隧道页面复制"
+echo "字段名: 'Client IPv6 Address'"
+echo ""
 echo -e "${BLUE}示例: 2001:470:1f28:26a::2${NC}"
 echo ""
-read -p "$(echo -e ${CYAN}请输入 Client IPv6 Address:${NC}) " CLIENT_IPV6
-while [[ -z "$CLIENT_IPV6" ]]; do
-    log_error "地址不能为空"
-    read -p "$(echo -e ${CYAN}请输入 Client IPv6 Address:${NC}) " CLIENT_IPV6
+
+while true; do
+    read -p "请粘贴 Client IPv6 Address: " CLIENT_IPV6
+    # 移除可能的空格
+    CLIENT_IPV6=$(echo "$CLIENT_IPV6" | tr -d ' ')
+    
+    if [[ -n "$CLIENT_IPV6" && "$CLIENT_IPV6" != "done" && "$CLIENT_IPV6" == *":"* ]]; then
+        break
+    else
+        log_error "输入无效，请输入完整的 IPv6 地址"
+    fi
 done
-log_success "已设置 Client IPv6: ${CLIENT_IPV6}"
+
+log_success "Client IPv6: ${CLIENT_IPV6}"
 
 # ========================================
 # 步骤 4：输入 Routed /64
@@ -164,39 +189,50 @@ echo -e "${CYAN}═════════════════════�
 echo -e "${YELLOW}  步骤 4/4: Routed /64 IPv6${NC}"
 echo -e "${CYAN}════════════════════════════════════════${NC}"
 echo ""
-echo "从 tunnelbroker.net 复制 'Routed /64'"
-echo -e "${BLUE}示例: 2001:470:1f29:26a::1${NC}"
-echo -e "${BLUE}或输入: 2001:470:1f29:26a::/64 (脚本会自动处理)${NC}"
+echo "从 tunnelbroker.net 隧道页面复制"
+echo "字段名: 'Routed /64'"
 echo ""
-read -p "$(echo -e ${CYAN}请输入 Routed /64:${NC}) " ROUTED_INPUT
-while [[ -z "$ROUTED_INPUT" ]]; do
-    log_error "地址不能为空"
-    read -p "$(echo -e ${CYAN}请输入 Routed /64:${NC}) " ROUTED_INPUT
+echo -e "${BLUE}示例 1: 2001:470:1f29:26a::1${NC}"
+echo -e "${BLUE}示例 2: 2001:470:1f29:26a::/64 (自动处理)${NC}"
+echo ""
+
+while true; do
+    read -p "请粘贴 Routed /64: " ROUTED_INPUT
+    # 移除可能的空格
+    ROUTED_INPUT=$(echo "$ROUTED_INPUT" | tr -d ' ')
+    
+    if [[ -n "$ROUTED_INPUT" && "$ROUTED_INPUT" != "done" && "$ROUTED_INPUT" == *":"* ]]; then
+        break
+    else
+        log_error "输入无效，请输入完整的 IPv6 地址或网段"
+    fi
 done
 
-# 处理 Routed /64 输入（支持带 /64 后缀）
+# 处理 Routed /64 输入
 if [[ $ROUTED_INPUT == *"/64" ]]; then
-    # 如果是 2001:470:1f29:26a::/64 格式，转换为 2001:470:1f29:26a::1
     ROUTED_IPV6=$(echo "$ROUTED_INPUT" | sed 's|::/64|::1|')
-elif [[ $ROUTED_INPUT == *"::" ]]; then
-    # 如果是 2001:470:1f29:26a:: 格式，添加 1
+elif [[ $ROUTED_INPUT == *"::" && $ROUTED_INPUT != *"::1" ]]; then
     ROUTED_IPV6="${ROUTED_INPUT}1"
 else
-    # 直接使用输入
     ROUTED_IPV6="$ROUTED_INPUT"
 fi
-log_success "已设置 Routed IPv6: ${ROUTED_IPV6}"
 
-# 计算 Gateway（从 Client IPv6 推导）
-GATEWAY_IPV6=$(echo "$CLIENT_IPV6" | sed 's/::[0-9]*$/::1/')
-log_info "自动计算 Gateway: ${GATEWAY_IPV6}"
+log_success "Routed IPv6: ${ROUTED_IPV6}"
+
+# 计算 Gateway
+GATEWAY_IPV6=$(echo "$CLIENT_IPV6" | sed 's/::[0-9a-f]*$/::\1/')
+if [[ "$GATEWAY_IPV6" == "$CLIENT_IPV6" ]]; then
+    # 如果没有成功替换，手动构造
+    GATEWAY_IPV6=$(echo "$CLIENT_IPV6" | sed 's/::2$/::1/')
+fi
+log_info "Gateway IPv6: ${GATEWAY_IPV6}"
 
 # ========================================
-# 确认配置信息
+# 确认配置
 # ========================================
 echo ""
 echo -e "${CYAN}════════════════════════════════════════${NC}"
-echo -e "${YELLOW}  配置摘要${NC}"
+echo -e "${YELLOW}  配置确认${NC}"
 echo -e "${CYAN}════════════════════════════════════════${NC}"
 echo ""
 echo "  本机 IPv4:      ${LOCAL_IPV4}"
@@ -213,8 +249,9 @@ echo "  3. 配置防火墙规则"
 echo "  4. 测试连通性"
 echo ""
 
-read -p "$(echo -e ${GREEN}确认配置并继续？[y/N]:${NC}) " -r
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+read -p "确认无误？输入 yes 继续，输入其他取消: " confirm
+
+if [[ "$confirm" != "yes" && "$confirm" != "YES" && "$confirm" != "y" && "$confirm" != "Y" ]]; then
     log_error "配置已取消"
     exit 1
 fi
@@ -334,7 +371,7 @@ fi
 echo ""
 log_info "测试 HE 网关连通性..."
 if timeout 10 ping6 -c 3 ${GATEWAY_IPV6} >/dev/null 2>&1; then
-    log_success "✓ 可以 ping 通 HE 网关 (${GATEWAY_IPV6})"
+    log_success "✓ 可以 ping 通 HE 网关"
 else
     log_warning "⚠ 无法 ping 通 HE 网关，但可能仍能正常工作"
 fi
@@ -367,7 +404,6 @@ if [[ -n "$OUTBOUND_IPV6" ]]; then
     fi
 else
     log_error "✗ 无法获取出站 IPv6 地址"
-    log_warning "可能需要等待几秒钟让网络稳定，或检查防火墙规则"
 fi
 
 # 完成
@@ -387,23 +423,6 @@ if [[ -n "$OUTBOUND_IPV6" ]]; then
         echo "  ✓ 显示位置: ${COUNTRY} - ${CITY}"
     fi
 fi
-echo "  ✓ 备份位置: ${BACKUP_DIR}"
 echo ""
 
-# 恢复方法
-echo -e "${YELLOW}如需恢复原生 IPv6：${NC}"
-echo "  sudo rm /etc/netplan/99-he-tunnel.yaml"
-echo "  sudo rm /etc/sysctl.d/99-disable-native-ipv6.conf"
-echo "  sudo sysctl -w net.ipv6.conf.${MAIN_IFACE}.disable_ipv6=0"
-echo "  sudo ip tunnel del he-ipv6"
-echo "  sudo netplan apply"
-echo ""
-
-# 哪吒监控提示
-echo -e "${CYAN}后续步骤（可选）：${NC}"
-echo "  1. 重启验证持久化: sudo reboot"
-echo "  2. 安装哪吒 Agent"
-echo "  3. 应用 IPv6 优先: bash <(curl https://raw.githubusercontent.com/xykt/Utilities/main/nezha/ipv6flag.sh)"
-echo ""
-
-log_success "配置完成！"
+log_success "配置完成！祝使用愉快！"
