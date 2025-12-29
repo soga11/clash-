@@ -244,7 +244,7 @@ step_2_input_tunnel_info() {
     done
     
     # 自动计算 Gateway
-    GATEWAY_IPV6=$(echo "$CLIENT_IPV6" | sed 's/::[0-9a-f]*$/::\1/')
+    GATEWAY_IPV6=$(echo "$CLIENT_IPV6" | sed 's/::[0-9a-f]*$/::1/')
     if [[ "$GATEWAY_IPV6" == "$CLIENT_IPV6" ]]; then
         GATEWAY_IPV6=$(echo "$CLIENT_IPV6" | sed 's/::2$/::1/')
     fi
