@@ -1,13 +1,13 @@
 #!/bin/bash
 
 #####################################################################
-# HE IPv6 隧道配置脚本 - 快速安装版
-# 支持 curl | bash 直接运行
+# HE IPv6 隧道配置脚本 - AWS 兼容版 + 状态保存
+# 支持 Netplan、传统网络配置、状态持久化
 #####################################################################
 
 set -e
 
-# 检测是否通过管道运行，重定向到 /dev/tty 以支持交互
+# 检测管道输入
 if [ ! -t 0 ]; then
     exec < /dev/tty
 fi
@@ -32,6 +32,9 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# 状态文件路径
+STATE_FILE="/root/.he-tunnel-state"
+
 # 全局变量
 LOCAL_IPV4=""
 HE_SERVER=""
@@ -40,6 +43,7 @@ ROUTED_IPV6=""
 GATEWAY_IPV6=""
 MAIN_IFACE=""
 BACKUP_DIR=""
+NETWORK_TYPE=""  # netplan, traditional, aws
 
 # 配置状态
 STEP_1_DONE=false
@@ -47,6 +51,64 @@ STEP_2_DONE=false
 STEP_3_DONE=false
 STEP_4_DONE=false
 STEP_5_DONE=false
+
+# ========================================
+# 状态管理
+# ========================================
+
+# 保存状态
+save_state() {
+    cat > "$STATE_FILE" << EOF
+LOCAL_IPV4="$LOCAL_IPV4"
+HE_SERVER="$HE_SERVER"
+CLIENT_IPV6="$CLIENT_IPV6"
+ROUTED_IPV6="$ROUTED_IPV6"
+GATEWAY_IPV6="$GATEWAY_IPV6"
+MAIN_IFACE="$MAIN_IFACE"
+BACKUP_DIR="$BACKUP_DIR"
+NETWORK_TYPE="$NETWORK_TYPE"
+STEP_1_DONE=$STEP_1_DONE
+STEP_2_DONE=$STEP_2_DONE
+STEP_3_DONE=$STEP_3_DONE
+STEP_4_DONE=$STEP_4_DONE
+STEP_5_DONE=$STEP_5_DONE
+EOF
+    chmod 600 "$STATE_FILE"
+}
+
+# 加载状态
+load_state() {
+    if [[ -f "$STATE_FILE" ]]; then
+        source "$STATE_FILE"
+        return 0
+    fi
+    return 1
+}
+
+# 清除状态
+clear_state() {
+    rm -f "$STATE_FILE"
+    log_info "已清除保存的配置"
+}
+
+# ========================================
+# 检测网络配置类型
+# ========================================
+detect_network_type() {
+    if [[ -d /etc/netplan ]] && ls /etc/netplan/*.yaml &>/dev/null; then
+        NETWORK_TYPE="netplan"
+        log_info "检测到 Netplan 配置系统"
+    elif [[ -f /etc/network/interfaces ]]; then
+        NETWORK_TYPE="traditional"
+        log_info "检测到传统网络配置（Debian/Ubuntu）"
+    elif [[ -f /etc/sysconfig/network-scripts/ifcfg-eth0 ]]; then
+        NETWORK_TYPE="redhat"
+        log_info "检测到 RedHat 系网络配置"
+    else
+        NETWORK_TYPE="unknown"
+        log_warning "未识别的网络配置类型，将使用通用方法"
+    fi
+}
 
 # ========================================
 # 显示 Banner
@@ -57,8 +119,9 @@ show_banner() {
     cat << "EOF"
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║        HE IPv6 隧道配置向导 - 快速安装版                  ║
+║        HE IPv6 隧道配置向导 - 增强版                      ║
 ║        Hurricane Electric Tunnel Setup Wizard            ║
+║        支持 AWS/Vultr/传统配置 + 状态保存                 ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 EOF
@@ -66,7 +129,7 @@ EOF
 }
 
 # ========================================
-# 确认函数（默认 yes）
+# 确认函数
 # ========================================
 confirm() {
     local prompt="$1"
@@ -96,6 +159,7 @@ show_menu() {
         echo -e "  ${GREEN}✓${NC} 步骤 1: 系统信息已获取"
         echo "      本机 IPv4: ${LOCAL_IPV4}"
         echo "      主网卡: ${MAIN_IFACE}"
+        echo "      网络类型: ${NETWORK_TYPE}"
     else
         echo -e "  ${YELLOW}○${NC} 步骤 1: 获取系统信息"
     fi
@@ -113,7 +177,7 @@ show_menu() {
     
     echo ""
     
-    [[ "$STEP_3_DONE" == true ]] && echo -e "  ${GREEN}✓${NC} 步骤 3: 原生 IPv6 已禁用" || echo -e "  ${YELLOW}○${NC} 步骤 3: 禁用原生 IPv6"
+    [[ "$STEP_3_DONE" == true ]] && echo -e "  ${GREEN}✓${NC} 步骤 3: 原生 IPv6 已禁用（可选）" || echo -e "  ${YELLOW}○${NC} 步骤 3: 禁用原生 IPv6（可选）"
     echo ""
     [[ "$STEP_4_DONE" == true ]] && echo -e "  ${GREEN}✓${NC} 步骤 4: HE 隧道已创建" || echo -e "  ${YELLOW}○${NC} 步骤 4: 创建 HE 隧道"
     echo ""
@@ -125,11 +189,12 @@ show_menu() {
     echo ""
     echo -e "  ${GREEN}1${NC}. 获取系统信息"
     echo -e "  ${GREEN}2${NC}. 输入 HE 隧道信息"
-    echo -e "  ${GREEN}3${NC}. 禁用原生 IPv6"
+    echo -e "  ${GREEN}3${NC}. 禁用原生 IPv6（可选）"
     echo -e "  ${GREEN}4${NC}. 安装 HE 隧道"
     echo -e "  ${GREEN}5${NC}. 验证配置"
     echo ""
     echo -e "  ${GREEN}9${NC}. 一键完整安装（推荐）"
+    echo -e "  ${YELLOW}8${NC}. 清除保存的配置"
     echo -e "  ${RED}0${NC}. 退出脚本"
     echo ""
     echo -e "${CYAN}════════════════════════════════════════${NC}"
@@ -160,12 +225,16 @@ step_1_get_system_info() {
     MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
     log_success "主网卡: ${MAIN_IFACE}"
     
+    log_info "检测网络配置类型..."
+    detect_network_type
+    
     NATIVE_IPV6=$(ip -6 addr show scope global | grep -oP '(?<=inet6\s)[0-9a-f:]+(?=/)' | head -n1)
-    [[ -n "$NATIVE_IPV6" ]] && log_warning "原生 IPv6: ${NATIVE_IPV6} (将被禁用)" || log_info "无原生 IPv6"
+    [[ -n "$NATIVE_IPV6" ]] && log_warning "原生 IPv6: ${NATIVE_IPV6}" || log_info "无原生 IPv6"
     
     echo ""
     STEP_1_DONE=true
-    log_success "步骤 1 完成！"
+    save_state
+    log_success "步骤 1 完成！配置已保存"
     echo ""
     read -p "按回车继续..."
 }
@@ -250,7 +319,8 @@ step_2_input_tunnel_info() {
     
     if confirm "确认信息无误？"; then
         STEP_2_DONE=true
-        log_success "步骤 2 完成！"
+        save_state
+        log_success "步骤 2 完成！配置已保存"
     else
         log_warning "已取消，请重新输入"
         STEP_2_DONE=false
@@ -261,7 +331,7 @@ step_2_input_tunnel_info() {
 }
 
 # ========================================
-# 步骤 3: 禁用原生 IPv6
+# 步骤 3: 禁用原生 IPv6（支持多种系统）
 # ========================================
 step_3_disable_native_ipv6() {
     if [[ "$STEP_1_DONE" != true ]]; then
@@ -272,34 +342,68 @@ step_3_disable_native_ipv6() {
     
     clear
     echo -e "${CYAN}════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}  步骤 3: 禁用原生 IPv6${NC}"
+    echo -e "${YELLOW}  步骤 3: 禁用原生 IPv6（可选）${NC}"
     echo -e "${CYAN}════════════════════════════════════════${NC}"
     echo ""
     
-    if ! confirm "即将禁用 ${MAIN_IFACE} 的原生 IPv6，继续？"; then
-        log_warning "操作已取消"
-        sleep 1
-        return
+    # 检查是否有原生 IPv6
+    NATIVE_IPV6=$(ip -6 addr show scope global | grep -oP '(?<=inet6\s)[0-9a-f:]+(?=/)' | head -n1)
+    if [[ -z "$NATIVE_IPV6" ]]; then
+        log_info "未检测到原生 IPv6，将配置预防性禁用参数"
+        if ! confirm "继续配置？"; then
+            STEP_3_DONE=true
+            save_state
+            log_info "已跳过步骤 3"
+            read -p "按回车继续..."
+            return
+        fi
+    else
+        log_warning "检测到原生 IPv6: ${NATIVE_IPV6}"
+        if ! confirm "即将禁用 ${MAIN_IFACE} 的原生 IPv6，继续？"; then
+            log_warning "操作已取消"
+            sleep 1
+            return
+        fi
     fi
     
     echo ""
     log_info "备份配置..."
     BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$BACKUP_DIR"
-    cp -r /etc/netplan/* "$BACKUP_DIR/" 2>/dev/null || true
-    log_success "已备份"
+    
+    # 根据不同系统类型备份
+    case "$NETWORK_TYPE" in
+        netplan)
+            cp -r /etc/netplan/* "$BACKUP_DIR/" 2>/dev/null || true
+            ;;
+        traditional)
+            cp /etc/network/interfaces "$BACKUP_DIR/" 2>/dev/null || true
+            ;;
+        redhat)
+            cp /etc/sysconfig/network-scripts/ifcfg-${MAIN_IFACE} "$BACKUP_DIR/" 2>/dev/null || true
+            ;;
+    esac
+    
+    log_success "已备份到: $BACKUP_DIR"
     
     log_info "配置系统参数..."
     tee /etc/sysctl.d/99-disable-native-ipv6.conf > /dev/null <<EOF
-net.ipv6.conf.${MAIN_IFACE}.disable_ipv6=1
+net.ipv6.conf.${MAIN_IFACE}.disable_ipv6=0
 net.ipv6.conf.${MAIN_IFACE}.accept_ra=0
 net.ipv6.conf.${MAIN_IFACE}.autoconf=0
+net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.all.accept_ra=0
 EOF
     sysctl -p /etc/sysctl.d/99-disable-native-ipv6.conf >/dev/null 2>&1
     log_success "系统参数已配置"
     
     log_info "更新网络配置..."
-    tee /etc/netplan/50-cloud-init.yaml > /dev/null <<EOF
+    
+    case "$NETWORK_TYPE" in
+        netplan)
+            # Netplan 配置
+            if [[ -f /etc/netplan/50-cloud-init.yaml ]]; then
+                tee /etc/netplan/50-cloud-init.yaml > /dev/null <<EOF
 network:
   version: 2
   ethernets:
@@ -308,8 +412,39 @@ network:
       dhcp6: false
       accept-ra: false
 EOF
-    chmod 600 /etc/netplan/50-cloud-init.yaml
-    log_success "网络配置已更新"
+                chmod 600 /etc/netplan/50-cloud-init.yaml
+                log_success "Netplan 配置已更新"
+            else
+                log_warning "未找到 Netplan 配置文件，跳过"
+            fi
+            ;;
+            
+        traditional)
+            # 传统 Debian/Ubuntu 配置
+            if ! grep -q "iface ${MAIN_IFACE} inet6" /etc/network/interfaces; then
+                echo "" >> /etc/network/interfaces
+                echo "# Disable IPv6 on ${MAIN_IFACE}" >> /etc/network/interfaces
+                echo "iface ${MAIN_IFACE} inet6 manual" >> /etc/network/interfaces
+                echo "    pre-up echo 0 > /proc/sys/net/ipv6/conf/${MAIN_IFACE}/accept_ra" >> /etc/network/interfaces
+            fi
+            log_success "传统网络配置已更新"
+            ;;
+            
+        redhat)
+            # RedHat 系配置
+            if [[ -f /etc/sysconfig/network-scripts/ifcfg-${MAIN_IFACE} ]]; then
+                if ! grep -q "IPV6INIT=no" /etc/sysconfig/network-scripts/ifcfg-${MAIN_IFACE}; then
+                    echo "IPV6INIT=no" >> /etc/sysconfig/network-scripts/ifcfg-${MAIN_IFACE}
+                    echo "IPV6_AUTOCONF=no" >> /etc/sysconfig/network-scripts/ifcfg-${MAIN_IFACE}
+                fi
+                log_success "RedHat 网络配置已更新"
+            fi
+            ;;
+            
+        *)
+            log_warning "未知网络类型，仅配置 sysctl 参数"
+            ;;
+    esac
     
     log_info "清理 IPv6..."
     ip -6 addr flush dev ${MAIN_IFACE} scope global 2>/dev/null || true
@@ -318,7 +453,8 @@ EOF
     
     echo ""
     STEP_3_DONE=true
-    log_success "步骤 3 完成！"
+    save_state
+    log_success "步骤 3 完成！配置已保存"
     echo ""
     read -p "按回车继续..."
 }
@@ -327,10 +463,21 @@ EOF
 # 步骤 4: 安装 HE 隧道
 # ========================================
 step_4_install_he_tunnel() {
-    if [[ "$STEP_1_DONE" != true || "$STEP_2_DONE" != true || "$STEP_3_DONE" != true ]]; then
-        log_error "请先完成前面的步骤"
+    if [[ "$STEP_1_DONE" != true || "$STEP_2_DONE" != true ]]; then
+        log_error "请先完成步骤 1 和步骤 2"
         sleep 1
         return
+    fi
+    
+    # 步骤 3 可选，如果未执行则自动配置基础禁用
+    if [[ "$STEP_3_DONE" != true ]]; then
+        log_warning "步骤 3 未执行，将自动配置基础参数..."
+        tee /etc/sysctl.d/99-disable-ipv6-ra.conf > /dev/null <<EOF
+net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.all.accept_ra=0
+EOF
+        sysctl -p /etc/sysctl.d/99-disable-ipv6-ra.conf >/dev/null 2>&1
+        log_success "基础参数已配置"
     fi
     
     clear
@@ -353,33 +500,59 @@ step_4_install_he_tunnel() {
     log_success "工具已安装"
     
     log_info "创建配置文件..."
-    tee /etc/netplan/99-he-tunnel.yaml > /dev/null <<EOF
-network:
-  version: 2
-  tunnels:
-    he-ipv6:
-      mode: sit
-      remote: ${HE_SERVER}
-      local: ${LOCAL_IPV4}
-      addresses:
-        - "${CLIENT_IPV6}/64"
-        - "${ROUTED_IPV6}/64"
-      routes:
-        - to: default
-          via: "${GATEWAY_IPV6}"
-EOF
-    chmod 600 /etc/netplan/99-he-tunnel.yaml
-    log_success "配置文件已创建"
     
-    log_info "创建隧道..."
-    ip tunnel del he-ipv6 2>/dev/null || true
-    ip tunnel add he-ipv6 mode sit remote ${HE_SERVER} local ${LOCAL_IPV4} ttl 255
-    ip link set he-ipv6 mtu 1480 up
-    ip -6 addr add ${CLIENT_IPV6}/64 dev he-ipv6
-    ip -6 addr add ${ROUTED_IPV6}/64 dev he-ipv6
-    ip -6 route add default via ${GATEWAY_IPV6} dev he-ipv6 metric 1024 2>/dev/null || true
-    ip -6 route flush cache
-    log_success "隧道已创建"
+    # 创建启动脚本（通用方法）
+    tee /usr/local/bin/he-ipv6-tunnel.sh > /dev/null <<EOF
+#!/bin/bash
+# HE IPv6 Tunnel Startup Script
+
+# 删除旧隧道
+ip tunnel del he-ipv6 2>/dev/null || true
+
+# 创建隧道
+ip tunnel add he-ipv6 mode sit remote ${HE_SERVER} local ${LOCAL_IPV4} ttl 255
+ip link set he-ipv6 mtu 1480
+ip link set he-ipv6 up
+
+# 添加地址
+ip -6 addr add ${CLIENT_IPV6}/64 dev he-ipv6
+ip -6 addr add ${ROUTED_IPV6}/64 dev he-ipv6
+
+# 添加路由
+ip -6 route add default via ${GATEWAY_IPV6} dev he-ipv6 metric 1024 2>/dev/null || true
+
+# 刷新缓存
+ip -6 route flush cache
+
+echo "HE IPv6 tunnel started successfully"
+EOF
+    chmod +x /usr/local/bin/he-ipv6-tunnel.sh
+    log_success "启动脚本已创建"
+    
+    log_info "创建 systemd 服务..."
+    tee /etc/systemd/system/he-ipv6-tunnel.service > /dev/null <<EOF
+[Unit]
+Description=HE IPv6 Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/he-ipv6-tunnel.sh
+ExecStop=/sbin/ip tunnel del he-ipv6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable he-ipv6-tunnel.service >/dev/null 2>&1
+    log_success "服务已创建并设置开机启动"
+    
+    log_info "启动隧道..."
+    /usr/local/bin/he-ipv6-tunnel.sh
+    log_success "隧道已启动"
     
     log_info "配置防火墙..."
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
@@ -389,7 +562,8 @@ EOF
     
     echo ""
     STEP_4_DONE=true
-    log_success "步骤 4 完成！"
+    save_state
+    log_success "步骤 4 完成！配置已保存"
     echo ""
     read -p "按回车继续..."
 }
@@ -453,12 +627,14 @@ step_5_verify_config() {
     
     if [[ -n "$OUTBOUND_IPV6" ]]; then
         STEP_5_DONE=true
+        save_state
         echo -e "${GREEN}✅ HE 隧道配置成功！${NC}"
         echo ""
         echo "配置摘要："
         echo "  出站 IPv6: ${OUTBOUND_IPV6}"
         [[ -n "$COUNTRY" ]] && echo "  显示位置: ${COUNTRY} - ${CITY}"
-        echo "  备份位置: ${BACKUP_DIR}"
+        echo "  配置文件: /usr/local/bin/he-ipv6-tunnel.sh"
+        echo "  服务状态: systemctl status he-ipv6-tunnel"
     else
         echo -e "${YELLOW}⚠️ 配置可能存在问题${NC}"
     fi
@@ -483,13 +659,15 @@ one_click_install() {
     LOCAL_IPV4=$(curl -4 -s --max-time 10 https://api.ipify.org 2>/dev/null || \
                  ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n1)
     MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+    detect_network_type
     
     if [[ -z "$LOCAL_IPV4" ]]; then
         read -p "无法检测 IPv4，请输入: " LOCAL_IPV4
     fi
     
-    log_success "IPv4: ${LOCAL_IPV4}, 网卡: ${MAIN_IFACE}"
+    log_success "IPv4: ${LOCAL_IPV4}, 网卡: ${MAIN_IFACE}, 类型: ${NETWORK_TYPE}"
     STEP_1_DONE=true
+    save_state
     echo ""
     
     # 步骤 2
@@ -533,6 +711,7 @@ one_click_install() {
     
     log_success "配置已设置"
     STEP_2_DONE=true
+    save_state
     echo ""
     
     if ! confirm "开始安装？"; then
@@ -544,34 +723,24 @@ one_click_install() {
     echo ""
     
     # 步骤 3
-    log_info "【3/5】禁用原生 IPv6..."
-    BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$BACKUP_DIR"
-    cp -r /etc/netplan/* "$BACKUP_DIR/" 2>/dev/null || true
-    
-    tee /etc/sysctl.d/99-disable-native-ipv6.conf > /dev/null <<EOF
-net.ipv6.conf.${MAIN_IFACE}.disable_ipv6=1
+    log_info "【3/5】配置系统参数..."
+    tee /etc/sysctl.d/99-disable-ipv6-ra.conf > /dev/null <<EOF
+net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.all.accept_ra=0
 net.ipv6.conf.${MAIN_IFACE}.accept_ra=0
 net.ipv6.conf.${MAIN_IFACE}.autoconf=0
 EOF
-    sysctl -p /etc/sysctl.d/99-disable-native-ipv6.conf >/dev/null 2>&1
+    sysctl -p /etc/sysctl.d/99-disable-ipv6-ra.conf >/dev/null 2>&1
     
-    tee /etc/netplan/50-cloud-init.yaml > /dev/null <<EOF
-network:
-  version: 2
-  ethernets:
-    ${MAIN_IFACE}:
-      dhcp4: true
-      dhcp6: false
-      accept-ra: false
-EOF
-    chmod 600 /etc/netplan/50-cloud-init.yaml
+    BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
     
     ip -6 addr flush dev ${MAIN_IFACE} scope global 2>/dev/null || true
     ip -6 route flush dev ${MAIN_IFACE} 2>/dev/null || true
     
-    log_success "原生 IPv6 已禁用"
+    log_success "系统参数已配置"
     STEP_3_DONE=true
+    save_state
     echo ""
     
     # 步骤 4
@@ -580,30 +749,39 @@ EOF
     apt-get update -qq >/dev/null 2>&1
     apt-get install -y net-tools iproute2 curl iptables-persistent jq >/dev/null 2>&1
     
-    tee /etc/netplan/99-he-tunnel.yaml > /dev/null <<EOF
-network:
-  version: 2
-  tunnels:
-    he-ipv6:
-      mode: sit
-      remote: ${HE_SERVER}
-      local: ${LOCAL_IPV4}
-      addresses:
-        - "${CLIENT_IPV6}/64"
-        - "${ROUTED_IPV6}/64"
-      routes:
-        - to: default
-          via: "${GATEWAY_IPV6}"
+    # 创建启动脚本
+    tee /usr/local/bin/he-ipv6-tunnel.sh > /dev/null <<EOF
+#!/bin/bash
+ip tunnel del he-ipv6 2>/dev/null || true
+ip tunnel add he-ipv6 mode sit remote ${HE_SERVER} local ${LOCAL_IPV4} ttl 255
+ip link set he-ipv6 mtu 1480 up
+ip -6 addr add ${CLIENT_IPV6}/64 dev he-ipv6
+ip -6 addr add ${ROUTED_IPV6}/64 dev he-ipv6
+ip -6 route add default via ${GATEWAY_IPV6} dev he-ipv6 metric 1024 2>/dev/null || true
+ip -6 route flush cache
 EOF
-    chmod 600 /etc/netplan/99-he-tunnel.yaml
+    chmod +x /usr/local/bin/he-ipv6-tunnel.sh
     
-    ip tunnel del he-ipv6 2>/dev/null || true
-    ip tunnel add he-ipv6 mode sit remote ${HE_SERVER} local ${LOCAL_IPV4} ttl 255
-    ip link set he-ipv6 mtu 1480 up
-    ip -6 addr add ${CLIENT_IPV6}/64 dev he-ipv6
-    ip -6 addr add ${ROUTED_IPV6}/64 dev he-ipv6
-    ip -6 route add default via ${GATEWAY_IPV6} dev he-ipv6 metric 1024 2>/dev/null || true
-    ip -6 route flush cache
+    # 创建服务
+    tee /etc/systemd/system/he-ipv6-tunnel.service > /dev/null <<EOF
+[Unit]
+Description=HE IPv6 Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/he-ipv6-tunnel.sh
+ExecStop=/sbin/ip tunnel del he-ipv6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable he-ipv6-tunnel.service >/dev/null 2>&1
+    /usr/local/bin/he-ipv6-tunnel.sh
     
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
     ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
@@ -611,6 +789,7 @@ EOF
     
     log_success "隧道已安装"
     STEP_4_DONE=true
+    save_state
     echo ""
     
     # 步骤 5
@@ -630,6 +809,7 @@ EOF
         fi
         
         STEP_5_DONE=true
+        save_state
         
         echo ""
         echo -e "${GREEN}════════════════════════════════════════${NC}"
@@ -638,6 +818,7 @@ EOF
         echo ""
         echo "  出站 IPv6: ${OUTBOUND_IPV6}"
         echo "  显示位置: ${COUNTRY} - ${CITY}"
+        echo "  服务状态: systemctl status he-ipv6-tunnel"
         echo ""
     else
         log_error "验证失败，请检查配置"
@@ -651,10 +832,16 @@ EOF
 # 主循环
 # ========================================
 main() {
+    # 尝试加载保存的状态
+    if load_state; then
+        log_info "检测到保存的配置，已自动加载"
+        sleep 1
+    fi
+    
     while true; do
         show_menu
         
-        read -p "请选择 [0-5,9]: " choice
+        read -p "请选择 [0-5,8,9]: " choice
         
         case $choice in
             1) step_1_get_system_info ;;
@@ -662,8 +849,9 @@ main() {
             3) step_3_disable_native_ipv6 ;;
             4) step_4_install_he_tunnel ;;
             5) step_5_verify_config ;;
+            8) clear_state; sleep 1 ;;
             9) one_click_install ;;
-            0) echo ""; log_info "退出"; exit 0 ;;
+            0) echo ""; log_info "退出"; save_state; exit 0 ;;
             *) log_error "无效选择"; sleep 1 ;;
         esac
     done
