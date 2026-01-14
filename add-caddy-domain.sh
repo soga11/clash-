@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # ============================================
-# Caddy 域名配置管理脚本（增强版 v3.1）
+# Caddy 域名配置管理脚本（增强版 v3.0）
 # 作者：soga11
-# 支持：systemd、OpenRC (Alpine)、SysVinit
+# 功能：反向代理、重定向、静态站点、批量导入、备份恢复、SSL管理、Telegram通知、证书监控
 # ============================================
 
 RED='\033[0;31m'
@@ -18,188 +18,6 @@ print_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_success() { echo -e "${CYAN}[SUCCESS]${NC} $1"; }
-
-# ============================================
-# 系统类型检测
-# ============================================
-
-detect_init_system() {
-    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        echo "systemd"
-    elif command -v rc-service &> /dev/null; then
-        echo "openrc"
-    elif command -v service &> /dev/null; then
-        echo "sysvinit"
-    else
-        echo "unknown"
-    fi
-}
-
-INIT_SYSTEM=$(detect_init_system)
-
-# ============================================
-# 服务管理兼容函数
-# ============================================
-
-service_restart() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl restart "$service_name"
-            return $?
-            ;;
-保存到Notion
-请求已中止
-
-现在能打开了 怎么优化 
-Alpine Linux Caddy 完整优化脚本
-直接执行以下命令创建完整的 Alpine 兼容脚本：
-
-Copy# 备份当前脚本
-cp add-caddy-domain.sh add-caddy-domain.sh.backup
-
-# 创建完整的 Alpine 兼容版本
-cat > add-caddy-domain.sh << 'SCRIPT_END'
-#!/bin/bash
-
-# ============================================
-# Caddy 域名配置管理脚本（增强版 v3.1 - Alpine 兼容）
-# 作者：soga11
-# 支持：systemd、OpenRC (Alpine)、SysVinit
-# ============================================
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
-
-print_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-print_success() { echo -e "${CYAN}[SUCCESS]${NC} $1"; }
-
-# ============================================
-# 系统检测
-# ============================================
-
-detect_init_system() {
-    if command -v systemctl &> /dev/null && systemctl --version &> /dev/null 2>&1; then
-        echo "systemd"
-    elif command -v rc-service &> /dev/null; then
-        echo "openrc"
-    elif command -v service &> /dev/null; then
-        echo "sysvinit"
-    else
-        echo "unknown"
-    fi
-}
-
-INIT_SYSTEM=$(detect_init_system)
-
-# ============================================
-# 服务管理兼容函数
-# ============================================
-
-service_restart() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl restart "$service_name"
-            ;;
-        openrc)
-            rc-service "$service_name" restart
-            ;;
-        sysvinit)
-            service "$service_name" restart
-            ;;
-        *)
-            caddy reload --config "$CADDYFILE"
-            ;;
-    esac
-    return $?
-}
-
-service_stop() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl stop "$service_name"
-            ;;
-        openrc)
-            rc-service "$service_name" stop
-            ;;
-        *)
-            killall caddy 2>/dev/null
-            ;;
-    esac
-}
-
-service_start() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl start "$service_name"
-            ;;
-        openrc)
-            rc-service "$service_name" start
-            ;;
-        *)
-            caddy run --config "$CADDYFILE" --adapter caddyfile &
-            ;;
-    esac
-}
-
-service_reload() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl reload "$service_name"
-            ;;
-        openrc)
-            rc-service "$service_name" reload 2>/dev/null || rc-service "$service_name" restart
-            ;;
-        *)
-            caddy reload --config "$CADDYFILE"
-            ;;
-    esac
-}
-
-service_is_active() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl is-active --quiet "$service_name"
-            ;;
-        openrc)
-            rc-service "$service_name" status &> /dev/null
-            ;;
-        *)
-            pgrep caddy > /dev/null
-            ;;
-    esac
-}
-
-service_status() {
-    local service_name=$1
-    case "$INIT_SYSTEM" in
-        systemd)
-            systemctl status "$service_name" --no-pager -l | head -20
-            ;;
-        openrc)
-            rc-service "$service_name" status
-            ;;
-        *)
-            if pgrep caddy > /dev/null; then
-                echo "Caddy is running (PID: $(pgrep caddy))"
-            else
-                echo "Caddy is not running"
-            fi
-            ;;
-    esac
-}
 
 # ============================================
 # 基础配置
@@ -231,9 +49,11 @@ mkdir -p "$COMPLETE_BACKUP_DIR"
 # Telegram 通知功能
 # ============================================
 
+# 发送 Telegram 消息
 send_telegram() {
     local message="$1"
     
+    # 加载配置
     if [ ! -f "$TG_CONFIG" ]; then
         return 0
     fi
@@ -244,6 +64,7 @@ send_telegram() {
         return 0
     fi
     
+    # 发送消息
     local api_url="https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage"
     
     curl -s -X POST "$api_url" \
@@ -255,6 +76,7 @@ send_telegram() {
     return $?
 }
 
+# 配置 Telegram 通知
 init_telegram() {
     echo ""
     print_info "配置 Telegram 通知"
@@ -283,25 +105,27 @@ init_telegram() {
         return 1
     fi
     
-    cat > "$TG_CONFIG" <<TGCONF
+    # 保存配置
+    cat > "$TG_CONFIG" <<EOF
 # Telegram 通知配置
 # 配置时间: $(date '+%Y-%m-%d %H:%M:%S')
 TG_BOT_TOKEN="${TG_BOT_TOKEN}"
 TG_CHAT_ID="${TG_CHAT_ID}"
 TG_ENABLED="true"
-TGCONF
+EOF
     
     chmod 600 "$TG_CONFIG"
     
     print_success "配置已保存到: $TG_CONFIG"
     
+    # 测试通知
     echo ""
     print_info "发送测试消息..."
     
     local test_msg="✅ <b>Caddy 管理脚本</b>
 
 📡 服务器: $(hostname)
-🌐 系统: Alpine Linux
+🌐 IP: $(curl -s ifconfig.me 2>/dev/null || echo '未知')
 ⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')
 
 🔔 Telegram 通知已成功配置！"
@@ -313,6 +137,7 @@ TGCONF
     fi
 }
 
+# 测试 Telegram 通知
 test_telegram() {
     echo ""
     
@@ -330,7 +155,7 @@ test_telegram() {
     local test_msg="🔔 <b>Caddy 通知测试</b>
 
 📡 服务器: $(hostname)
-🌐 系统: Alpine Linux ($INIT_SYSTEM)
+🌐 IP: $(curl -s ifconfig.me 2>/dev/null || echo '未知')
 ⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')
 🔐 Caddy 版本: $(caddy version 2>/dev/null | head -1 || echo '未知')
 
@@ -357,6 +182,7 @@ test_telegram() {
 # 基础工具函数
 # ============================================
 
+# 获取公网 IP
 get_public_ip() {
     echo ""
     print_info "本机公网 IP 地址："
@@ -378,11 +204,11 @@ get_public_ip() {
     echo ""
 }
 
+# 显示主菜单
 show_menu() {
     clear
     echo "========================================"
-    echo "   Caddy 域名配置管理 v3.1"
-    echo "   系统: Alpine Linux ($INIT_SYSTEM)"
+    echo "   Caddy 域名配置管理 v3.0 增强版"
     echo "========================================"
     echo ""
     echo "【配置管理】"
@@ -435,6 +261,7 @@ show_menu() {
     echo "  0. 退出"
     echo "========================================"
     
+    # 显示快速状态
     if [ -f "$TG_CONFIG" ]; then
         source "$TG_CONFIG" 2>/dev/null
         if [ "$TG_ENABLED" = "true" ]; then
@@ -449,12 +276,14 @@ show_menu() {
     echo ""
 }
 
+# 备份配置文件
 backup_config() {
     local backup_file="$BACKUP_DIR/Caddyfile.$(date +%Y%m%d_%H%M%S).backup"
     cp "$CADDYFILE" "$backup_file"
     print_info "已备份到: $backup_file"
 }
 
+# 检查域名是否已存在
 check_domain_exists() {
     local DOMAIN=$1
     if grep -q "^${DOMAIN}" "$CADDYFILE" 2>/dev/null; then
@@ -464,12 +293,14 @@ check_domain_exists() {
             print_info "已取消"
             return 1
         fi
+        # 删除旧配置
         sed -i "/# .*${DOMAIN}/,/^}/d" "$CADDYFILE"
         sed -i "/^${DOMAIN}/,/^}/d" "$CADDYFILE"
     fi
     return 0
 }
 
+# 应用配置并重启
 apply_config() {
     print_info "正在验证配置..."
     
@@ -478,7 +309,7 @@ apply_config() {
         
         read -p "是否重启 Caddy 使配置生效？(Y/n): " RESTART
         if [ "$RESTART" != "n" ] && [ "$RESTART" != "N" ]; then
-            service_restart caddy
+            systemctl restart caddy
             if [ $? -eq 0 ]; then
                 print_success "Caddy 已重启，配置已生效！"
                 echo ""
@@ -488,6 +319,7 @@ apply_config() {
                     print_info "等待 DNS 生效后访问：https://${DOMAIN}"
                 fi
                 
+                # 发送 Telegram 通知
                 send_telegram "✅ <b>Caddy 配置已更新</b>
 
 🌐 域名: ${DOMAIN}
@@ -495,7 +327,9 @@ apply_config() {
 ✅ 状态: 配置已生效"
             else
                 print_error "Caddy 重启失败"
+                journalctl -u caddy -n 20 --no-pager
                 
+                # 发送失败通知
                 send_telegram "❌ <b>Caddy 重启失败</b>
 
 🌐 域名: ${DOMAIN}
@@ -513,6 +347,7 @@ apply_config() {
             cp "$LATEST_BACKUP" "$CADDYFILE"
             print_success "已恢复备份: $LATEST_BACKUP"
             
+            # 发送失败通知
             send_telegram "⚠️ <b>Caddy 配置验证失败</b>
 
 🌐 域名: ${DOMAIN}
@@ -526,6 +361,7 @@ apply_config() {
 # 配置管理功能
 # ============================================
 
+# 1. 反向代理 - 域名
 add_reverse_proxy_domain() {
     echo ""
     print_info "配置反向代理 - 后端域名"
@@ -564,6 +400,7 @@ CONF
     apply_config
 }
 
+# 2. 反向代理 - IP+端口
 add_reverse_proxy_ip() {
     echo ""
     print_info "配置反向代理 - 后端 IP+端口"
@@ -620,6 +457,7 @@ CONF
     apply_config
 }
 
+# 3. 站点重定向
 add_redirect() {
     echo ""
     print_info "配置站点重定向"
@@ -666,6 +504,7 @@ CONF
     apply_config
 }
 
+# 4. 静态文件站点
 add_static_site() {
     echo ""
     print_info "配置静态文件站点"
@@ -732,6 +571,7 @@ CONF
     apply_config
 }
 
+# 5. 修改现有配置
 modify_config() {
     echo ""
     print_info "修改现有配置"
@@ -798,6 +638,7 @@ modify_config() {
             
             print_success "后端地址已更新为: $new_backend"
             
+            # 发送通知
             send_telegram "🔄 <b>配置已修改</b>
 
 🌐 域名: ${target_domain}
@@ -806,7 +647,7 @@ modify_config() {
             
             read -p "是否重启 Caddy？(Y/n): " RESTART
             if [ "$RESTART" != "n" ] && [ "$RESTART" != "N" ]; then
-                service_restart caddy
+                systemctl restart caddy
                 print_success "Caddy 已重启"
             fi
             ;;
@@ -822,6 +663,7 @@ modify_config() {
     esac
 }
 
+# 6. 批量导入配置
 batch_import() {
     echo ""
     print_info "批量导入配置"
@@ -866,6 +708,7 @@ CONF
     echo ""
     print_info "共导入 $count 个配置"
     
+    # 发送通知
     send_telegram "📦 <b>批量导入配置</b>
 
 📊 数量: ${count} 个域名
@@ -879,6 +722,7 @@ CONF
 # 查看管理功能
 # ============================================
 
+# 7. 查看当前配置
 view_config() {
     echo ""
     print_info "当前配置："
@@ -887,6 +731,7 @@ view_config() {
     echo "========================================"
 }
 
+# 8. 查看域名列表
 list_domains() {
     echo ""
     print_info "已配置的域名："
@@ -895,6 +740,7 @@ list_domains() {
     echo "========================================"
 }
 
+# 9. 删除域名配置
 delete_domain() {
     echo ""
     list_domains
@@ -909,6 +755,7 @@ delete_domain() {
     
     print_success "配置已删除"
     
+    # 发送通知
     send_telegram "🗑️ <b>域名配置已删除</b>
 
 🌐 域名: ${DOMAIN}
@@ -916,10 +763,11 @@ delete_domain() {
     
     read -p "是否重启 Caddy？(Y/n): " RESTART
     if [ "$RESTART" != "n" ] && [ "$RESTART" != "N" ]; then
-        service_restart caddy
+        systemctl restart caddy
     fi
 }
 
+# 10. 导出配置
 export_config() {
     echo ""
     local export_file="/root/caddy_config_$(date +%Y%m%d_%H%M%S).txt"
@@ -931,6 +779,7 @@ export_config() {
 # 备份恢复功能
 # ============================================
 
+# 11. 手动备份配置
 manual_backup() {
     echo ""
     read -p "输入备份备注（可选）: " note
@@ -944,6 +793,7 @@ manual_backup() {
     print_success "已备份到: $backup_file"
 }
 
+# 12. 恢复备份
 restore_backup() {
     echo ""
     print_info "可用的备份："
@@ -979,6 +829,7 @@ restore_backup() {
     fi
 }
 
+# 13. 查看备份列表
 list_backups() {
     echo ""
     print_info "备份列表："
@@ -987,6 +838,7 @@ list_backups() {
     echo "========================================"
 }
 
+# 23. 完整备份（配置+证书）
 complete_backup() {
     echo ""
     print_info "创建完整备份（配置 + 证书）"
@@ -998,9 +850,11 @@ complete_backup() {
     
     mkdir -p "$backup_path"
     
+    # 1. 备份配置文件
     print_info "备份配置文件..."
     cp "$CADDYFILE" "$backup_path/Caddyfile"
     
+    # 2. 备份证书
     print_info "备份证书..."
     local cert_count=0
     if [ -d "/var/lib/caddy/.local/share/caddy/certificates" ]; then
@@ -1010,23 +864,26 @@ complete_backup() {
         print_warning "未找到证书目录"
     fi
     
+    # 3. 备份账户密钥
     print_info "备份账户密钥..."
     if [ -d "/var/lib/caddy/.local/share/caddy/acme" ]; then
         cp -r /var/lib/caddy/.local/share/caddy/acme "$backup_path/"
     fi
     
+    # 4. 备份 Telegram 配置
     if [ -f "$TG_CONFIG" ]; then
         cp "$TG_CONFIG" "$backup_path/"
     fi
     
-    cat > "$backup_path/backup_info.txt" <<BKINFO
+    # 5. 生成备份信息
+    cat > "$backup_path/backup_info.txt" <<EOF
 ========================================
 Caddy 完整备份信息
 ========================================
 
 备份时间: $(date '+%Y-%m-%d %H:%M:%S')
 服务器: $(hostname)
-系统: Alpine Linux
+IP 地址: $(curl -s ifconfig.me 2>/dev/null || echo '未知')
 Caddy 版本: $(caddy version 2>/dev/null | head -1 || echo "未知")
 
 备份内容:
@@ -1039,8 +896,33 @@ Caddy 版本: $(caddy version 2>/dev/null | head -1 || echo "未知")
 $(grep -E '^\S+\s+{' "$CADDYFILE" 2>/dev/null | grep -v '^{' | sed 's/ {//' | nl)
 
 ========================================
-BKINFO
+恢复方法:
+========================================
+
+1. 传输备份到新服务器:
+   scp ${backup_name}.tar.gz root@新服务器:/root/
+
+2. 在新服务器解压:
+   tar -xzf ${backup_name}.tar.gz -C /tmp/
+
+3. 恢复配置:
+   cp /tmp/${backup_name}/Caddyfile /etc/caddy/
+
+4. 恢复证书:
+   cp -r /tmp/${backup_name}/certificates /var/lib/caddy/.local/share/caddy/
+   cp -r /tmp/${backup_name}/acme /var/lib/caddy/.local/share/caddy/
+
+5. 设置权限:
+   chown -R caddy:caddy /var/lib/caddy
+   chmod -R 755 /var/lib/caddy
+
+6. 重启服务:
+   systemctl restart caddy
+
+========================================
+EOF
     
+    # 6. 打包压缩
     print_info "创建压缩包..."
     cd "$COMPLETE_BACKUP_DIR"
     tar -czf "${backup_name}.tar.gz" "$backup_name"
@@ -1048,8 +930,10 @@ BKINFO
     local backup_file="${COMPLETE_BACKUP_DIR}/${backup_name}.tar.gz"
     local backup_size=$(du -h "$backup_file" | cut -f1)
     
+    # 清理临时目录
     rm -rf "$backup_path"
     
+    # 清理旧备份（保留最近 10 个）
     print_info "清理旧备份..."
     ls -t ${COMPLETE_BACKUP_DIR}/caddy_complete_*.tar.gz 2>/dev/null | tail -n +11 | xargs -r rm
     
@@ -1061,6 +945,7 @@ BKINFO
     echo "  证书: ${cert_count} 个"
     echo ""
     
+    # 发送 Telegram 通知
     local notify_msg="💾 <b>Caddy 完整备份</b>
 
 📁 文件: ${backup_name}.tar.gz
@@ -1072,6 +957,7 @@ BKINFO
     print_info "已发送 Telegram 通知"
 }
 
+# 24. 一键恢复完整备份
 quick_restore() {
     echo ""
     print_info "可用的完整备份："
@@ -1110,12 +996,15 @@ quick_restore() {
         return 0
     fi
     
+    # 停止 Caddy
     print_info "停止 Caddy 服务..."
-    service_stop caddy
+    systemctl stop caddy
     
+    # 备份当前配置
     print_info "备份当前配置..."
     cp "$CADDYFILE" "${CADDYFILE}.before_restore.$(date +%s)"
     
+    # 解压恢复
     local restore_tmp="/tmp/caddy_restore_$$"
     mkdir -p "$restore_tmp"
     
@@ -1128,32 +1017,39 @@ quick_restore() {
         restore_dir="$restore_tmp"
     fi
     
+    # 恢复配置
     print_info "恢复配置文件..."
     if [ -f "${restore_dir}/Caddyfile" ]; then
         cp "${restore_dir}/Caddyfile" "$CADDYFILE"
     fi
     
+    # 恢复证书
     print_info "恢复证书..."
     if [ -d "${restore_dir}/certificates" ]; then
         rm -rf /var/lib/caddy/.local/share/caddy/certificates
         cp -r "${restore_dir}/certificates" /var/lib/caddy/.local/share/caddy/
     fi
     
+    # 恢复账户密钥
     if [ -d "${restore_dir}/acme" ]; then
         rm -rf /var/lib/caddy/.local/share/caddy/acme
         cp -r "${restore_dir}/acme" /var/lib/caddy/.local/share/caddy/
     fi
     
+    # 恢复 Telegram 配置
     if [ -f "${restore_dir}/telegram.conf" ]; then
         cp "${restore_dir}/telegram.conf" "$TG_CONFIG"
     fi
     
+    # 设置权限
     print_info "设置权限..."
     chown -R caddy:caddy /var/lib/caddy 2>/dev/null || chown -R www-data:www-data /var/lib/caddy 2>/dev/null
     chmod -R 755 /var/lib/caddy
     
+    # 清理临时文件
     rm -rf "$restore_tmp"
     
+    # 验证配置
     print_info "验证配置..."
     if caddy validate --config "$CADDYFILE" 2>/dev/null; then
         print_success "配置验证通过"
@@ -1162,28 +1058,32 @@ quick_restore() {
         caddy validate --config "$CADDYFILE"
     fi
     
+    # 启动 Caddy
     print_info "启动 Caddy 服务..."
-    service_start caddy
+    systemctl start caddy
     
     sleep 2
     
-    if service_is_active caddy; then
+    if systemctl is-active --quiet caddy; then
         print_success "恢复完成！Caddy 服务已启动"
     else
         print_error "Caddy 服务启动失败"
+        journalctl -u caddy -n 20 --no-pager
     fi
     
+    # 发送通知
     send_telegram "♻️ <b>Caddy 完整恢复</b>
 
 📁 来源: $(basename $backup_file)
 ⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')
-✅ 状态: $(service_is_active caddy && echo '运行中' || echo '已停止')"
+✅ 状态: $(systemctl is-active caddy)"
 }
 
 # ============================================
 # 证书管理功能
 # ============================================
 
+# 14. 查看 SSL 证书状态
 check_ssl_status() {
     echo ""
     print_info "SSL 证书状态："
@@ -1204,6 +1104,7 @@ check_ssl_status() {
     echo "========================================"
 }
 
+# 15. 强制更新证书
 force_renew_cert() {
     echo ""
     list_domains
@@ -1217,16 +1118,17 @@ force_renew_cert() {
     fi
     
     print_info "停止 Caddy..."
-    service_stop caddy
+    systemctl stop caddy
     
     print_info "删除旧证书..."
     rm -rf "/var/lib/caddy/.local/share/caddy/certificates/${domain}"
     
     print_info "启动 Caddy..."
-    service_start caddy
+    systemctl start caddy
     
     print_success "证书将在访问时自动重新申请"
     
+    # 发送通知
     send_telegram "🔄 <b>证书更新</b>
 
 🌐 域名: ${domain}
@@ -1234,6 +1136,7 @@ force_renew_cert() {
 ✅ 证书将自动重新申请"
 }
 
+# 25. 检查证书到期状态
 check_cert_expiry() {
     echo ""
     print_info "检查证书到期状态..."
@@ -1264,6 +1167,7 @@ check_cert_expiry() {
             if [ -n "$expiry_epoch" ]; then
                 local days_left=$(( ($expiry_epoch - $current_epoch) / 86400 ))
                 
+                # 颜色显示
                 if [ $days_left -lt $warning_days ]; then
                     printf "${RED}%-30s %-20s %-10s${NC}\n" "$domain" "$(date -d \"$expiry_date\" '+%Y-%m-%d' 2>/dev/null)" "${days_left} 天 ⚠️"
                     alert_message="${alert_message}🔴 ${domain}\n   到期: $(date -d \"$expiry_date\" '+%Y-%m-%d' 2>/dev/null)\n   剩余: ${days_left} 天\n\n"
@@ -1279,6 +1183,7 @@ check_cert_expiry() {
     
     echo "=========================================="
     
+    # 发送告警通知
     if [ $alert_count -gt 0 ]; then
         alert_message="${alert_message}📊 总计: ${alert_count} 个证书需要关注\n⏰ 检查时间: $(date '+%Y-%m-%d %H:%M:%S')"
         send_telegram "$alert_message"
@@ -1292,11 +1197,13 @@ check_cert_expiry() {
 # 监控告警功能
 # ============================================
 
+# 28. 安装证书监控任务
 install_cert_monitor() {
     echo ""
-    print_info "安装证书监控定时任务（Alpine cron）"
+    print_info "安装证书监控定时任务"
     echo ""
     
+    # 检查是否已配置 Telegram
     if [ ! -f "$TG_CONFIG" ]; then
         print_warning "请先配置 Telegram 通知（选项 26）"
         read -p "是否现在配置？(Y/n): " config_now
@@ -1309,16 +1216,22 @@ install_cert_monitor() {
     
     local monitor_script="/usr/local/bin/caddy-cert-monitor.sh"
     
-    cat > "$monitor_script" <<'MONITOR'
-#!/bin/sh
+    # 创建监控脚本
+    cat > "$monitor_script" <<'MONITOR_EOF'
+#!/bin/bash
+
+# Caddy 证书监控脚本
+# 自动生成 - 请勿手动编辑
 
 TG_CONFIG="/etc/caddy/telegram.conf"
 LOG_FILE="/var/log/caddy-cert-monitor.log"
 
+# 加载 Telegram 配置
 if [ -f "$TG_CONFIG" ]; then
-    . "$TG_CONFIG"
+    source "$TG_CONFIG"
 fi
 
+# 发送 Telegram 消息
 send_telegram() {
     local message="$1"
     
@@ -1326,23 +1239,28 @@ send_telegram() {
         return 0
     fi
     
-    wget -q -O /dev/null --post-data="chat_id=${TG_CHAT_ID}&text=${message}&parse_mode=HTML" \
-        "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage"
+    curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+        -d chat_id="${TG_CHAT_ID}" \
+        -d text="$message" \
+        -d parse_mode="HTML" \
+        > /dev/null 2>&1
 }
 
+# 记录日志
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
+# 检查证书
 log_message "开始证书检查"
 
 cert_dir="/var/lib/caddy/.local/share/caddy/certificates"
 warning_days=7
 alert_count=0
-alert_message="⚠️ <b>证书到期警告</b>%0A%0A"
+alert_message="⚠️ <b>证书到期警告</b>\n\n"
 
 if [ -d "$cert_dir" ]; then
-    find "$cert_dir" -name "*.crt" | while read cert_file; do
+    while IFS= read -r cert_file; do
         domain=$(basename $(dirname "$cert_file"))
         expiry_date=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)
         
@@ -1354,16 +1272,16 @@ if [ -d "$cert_dir" ]; then
                 days_left=$(( ($expiry_epoch - $current_epoch) / 86400 ))
                 
                 if [ $days_left -lt $warning_days ]; then
-                    alert_message="${alert_message}🔴 ${domain}%0A   到期: $(date -d \"$expiry_date\" '+%Y-%m-%d' 2>/dev/null)%0A   剩余: ${days_left} 天%0A%0A"
-                    alert_count=$((alert_count + 1))
+                    alert_message="${alert_message}🔴 ${domain}\n   到期: $(date -d \"$expiry_date\" '+%Y-%m-%d' 2>/dev/null)\n   剩余: ${days_left} 天\n\n"
+                    ((alert_count++))
                     log_message "警告: ${domain} 证书将在 ${days_left} 天后过期"
                 fi
             fi
         fi
-    done
+    done < <(find "$cert_dir" -name "*.crt")
     
     if [ $alert_count -gt 0 ]; then
-        alert_message="${alert_message}📊 总计: ${alert_count} 个证书需要关注%0A⏰ 检查时间: $(date '+%Y-%m-%d %H:%M:%S')"
+        alert_message="${alert_message}📊 总计: ${alert_count} 个证书需要关注\n⏰ 检查时间: $(date '+%Y-%m-%d %H:%M:%S')"
         send_telegram "$alert_message"
         log_message "发送告警通知，共 ${alert_count} 个证书"
     else
@@ -1373,25 +1291,28 @@ else
     log_message "错误: 证书目录不存在"
 fi
 
-if ! pgrep caddy > /dev/null; then
-    error_msg="🚨 <b>Caddy 服务异常</b>%0A%0A❌ Caddy 服务已停止%0A⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')%0A%0A请立即检查！"
+# 检查 Caddy 服务状态
+if ! systemctl is-active --quiet caddy; then
+    error_msg="🚨 <b>Caddy 服务异常</b>\n\n❌ Caddy 服务已停止\n⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')\n\n请立即检查！"
     send_telegram "$error_msg"
     log_message "错误: Caddy 服务未运行"
 fi
 
 log_message "证书检查完成"
-MONITOR
+MONITOR_EOF
     
     chmod +x "$monitor_script"
     
-    # Alpine 使用 crontab
+    # 添加 cron 任务（每天早上 9 点检查）
     local cron_job="0 9 * * * $monitor_script"
     
-    (crontab -l 2>/dev/null | grep -v "caddy-cert-monitor"; echo "$cron_job") | crontab -
-    
-    # 启动 crond 服务
-    rc-service crond start 2>/dev/null
-    rc-update add crond 2>/dev/null
+    # 检查是否已存在
+    if crontab -l 2>/dev/null | grep -q "caddy-cert-monitor"; then
+        print_info "定时任务已存在，更新中..."
+        (crontab -l 2>/dev/null | grep -v "caddy-cert-monitor"; echo "$cron_job") | crontab -
+    else
+        (crontab -l 2>/dev/null; echo "$cron_job") | crontab -
+    fi
     
     print_success "证书监控已安装"
     echo ""
@@ -1402,6 +1323,7 @@ MONITOR
     echo "  - 日志文件: /var/log/caddy-cert-monitor.log"
     echo ""
     
+    # 发送通知
     send_telegram "📊 <b>证书监控已启用</b>
 
 ⏰ 检查时间: 每天 09:00
@@ -1411,11 +1333,12 @@ MONITOR
     read -p "是否立即执行一次测试？(Y/n): " test_now
     if [ "$test_now" != "n" ] && [ "$test_now" != "N" ]; then
         print_info "执行测试检查..."
-        sh "$monitor_script"
+        bash "$monitor_script"
         print_success "测试完成，请查看 Telegram 通知和日志"
     fi
 }
 
+# 29. 查看监控日志
 view_monitor_log() {
     local log_file="/var/log/caddy-cert-monitor.log"
     
@@ -1439,22 +1362,27 @@ view_monitor_log() {
 # 域名管理增强
 # ============================================
 
+# 30. 导出域名列表（CSV）
 export_domains_csv() {
     echo ""
     print_info "导出域名列表"
     
     local export_file="/root/caddy_domains_$(date +%Y%m%d_%H%M%S).csv"
     
+    # CSV 表头
     echo "序号,域名,类型,后端地址,添加时间,证书状态,到期时间" > "$export_file"
     
     local index=1
     local cert_dir="/var/lib/caddy/.local/share/caddy/certificates"
     
+    # 解析 Caddyfile
     while IFS= read -r domain; do
+        # 判断类型
         local type="未知"
         local backend="N/A"
         local add_time="未知"
         
+        # 提取配置块
         local config_block=$(sed -n "/^${domain} {/,/^}/p" "$CADDYFILE")
         
         if echo "$config_block" | grep -q "reverse_proxy"; then
@@ -1468,11 +1396,13 @@ export_domains_csv() {
             backend=$(echo "$config_block" | grep "root" | awk '{print $3}')
         fi
         
+        # 提取添加时间
         local comment_line=$(grep -B3 "^${domain} {" "$CADDYFILE" | grep "时间:" | tail -1)
         if [ -n "$comment_line" ]; then
             add_time=$(echo "$comment_line" | sed 's/.*时间: //' | sed 's/ *#.*//')
         fi
         
+        # 检查证书状态
         local cert_status="无证书"
         local expiry_date="N/A"
         
@@ -1484,6 +1414,7 @@ export_domains_csv() {
                 if [ -n "$expiry_date" ]; then
                     expiry_date=$(date -d "$expiry_date" '+%Y-%m-%d' 2>/dev/null)
                     
+                    # 检查是否即将过期
                     local expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null)
                     local current_epoch=$(date +%s)
                     if [ -n "$expiry_epoch" ]; then
@@ -1497,6 +1428,7 @@ export_domains_csv() {
             fi
         fi
         
+        # 写入 CSV
         echo "${index},${domain},${type},${backend},${add_time},${cert_status},${expiry_date}" >> "$export_file"
         
         ((index++))
@@ -1511,6 +1443,7 @@ export_domains_csv() {
     head -10 "$export_file" | column -t -s ','
     echo "========================================"
     
+    # 发送通知
     local domain_count=$((index - 1))
     send_telegram "📋 <b>域名列表导出</b>
 
@@ -1519,12 +1452,13 @@ export_domains_csv() {
 ⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')"
 }
 
+# 31. 域名统计报告
 domain_statistics() {
     echo ""
     print_info "域名统计报告"
     echo ""
     
-    local total_domains=$(grep -E '^\S+\s+{' "$CADDYFILE" 2>/dev/null | grep -v '^{' | wc -l)
+    local total_domains=$(grep -c -E '^\S+\s+{' "$CADDYFILE" 2>/dev/null | grep -v '^{' || echo 0)
     local proxy_count=$(grep -c "reverse_proxy" "$CADDYFILE" 2>/dev/null || echo 0)
     local redirect_count=$(grep -c "redir" "$CADDYFILE" 2>/dev/null || echo 0)
     local static_count=$(grep -c "file_server" "$CADDYFILE" 2>/dev/null || echo 0)
@@ -1536,6 +1470,7 @@ domain_statistics() {
     if [ -d "$cert_dir" ]; then
         cert_count=$(find "$cert_dir" -name "*.crt" 2>/dev/null | wc -l)
         
+        # 统计即将过期的证书
         while IFS= read -r cert_file; do
             local expiry_date=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)
             if [ -n "$expiry_date" ]; then
@@ -1572,11 +1507,8 @@ domain_statistics() {
     echo "⚙️ 服务状态"
     echo "=========================================="
     echo ""
-    if service_is_active caddy; then
-        echo "  Caddy 状态: 运行中 ✅"
-    else
-        echo "  Caddy 状态: 已停止 ❌"
-    fi
+    echo "  Caddy 状态: $(systemctl is-active caddy)"
+    echo "  运行时间: $(systemctl show caddy --property=ActiveEnterTimestamp --value 2>/dev/null | xargs -I {} date -d {} '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '未知')"
     echo "  内存使用: $(ps aux | grep '[c]addy' | awk '{sum+=$6} END {print sum/1024 " MB"}' 2>/dev/null || echo '未知')"
     echo ""
     echo "=========================================="
@@ -1586,12 +1518,13 @@ domain_statistics() {
 # 服务管理功能
 # ============================================
 
+# 16. 重启 Caddy
 restart_caddy() {
     print_info "重启 Caddy..."
-    service_restart caddy
+    systemctl restart caddy
     if [ $? -eq 0 ]; then
         print_success "Caddy 已重启"
-        service_status caddy
+        systemctl status caddy --no-pager -l | head -10
         
         send_telegram "🔄 <b>Caddy 服务重启</b>
 
@@ -1607,30 +1540,21 @@ restart_caddy() {
     fi
 }
 
+# 17. 查看日志
 view_logs() {
-    print_info "Caddy 日志（Alpine 系统）:"
-    echo ""
-    echo "查看日志方式："
-    echo "  1. rc-service caddy status"
-    echo "  2. cat /var/log/caddy/access.log"
-    echo "  3. tail -f /var/log/messages | grep caddy"
-    echo ""
-    
-    if [ -f "/var/log/caddy/access.log" ]; then
-        print_info "最近 50 条访问日志："
-        tail -50 /var/log/caddy/access.log
-    else
-        print_warning "未找到 Caddy 日志文件"
-    fi
+    print_info "Caddy 实时日志（Ctrl+C 退出）:"
+    journalctl -u caddy -f
 }
 
+# 18. 查看状态
 view_status() {
     echo ""
-    service_status caddy
+    systemctl status caddy --no-pager -l
     echo ""
     get_public_ip
 }
 
+# 19. 验证配置
 validate_config() {
     echo ""
     print_info "验证配置..."
@@ -1645,10 +1569,12 @@ validate_config() {
 # 系统工具功能
 # ============================================
 
+# 20. 查看本机 IP
 show_ip() {
     get_public_ip
 }
 
+# 21. 测试域名解析
 test_dns() {
     echo ""
     read -p "输入要测试的域名: " domain
@@ -1690,66 +1616,112 @@ test_dns() {
     fi
 }
 
+# 22. 性能优化
 optimize_performance() {
     echo ""
-    print_info "Caddy 性能优化（Alpine Linux）"
+    print_info "Caddy 性能优化"
+    echo ""
+    echo "优化功能："
+    echo "  ✓ HTTP/3 (QUIC) - 下一代 HTTP 协议"
+    echo "  ✓ 自动 HTTPS - 自动证书管理"
+    echo "  ✓ 现代 TLS 配置 - 更安全的加密"
     echo ""
     
-    local caddy_version=$(caddy version 2>/dev/null | head -1)
-    print_info "Caddy 版本: $caddy_version"
-    
-    echo ""
-    print_info "检查 HTTP/3 状态..."
-    
-    if netstat -ulpn 2>/dev/null | grep -q :443 || ss -ulpn 2>/dev/null | grep -q :443; then
-        print_success "HTTP/3 已启用并运行中！"
+    # 检查是否已有全局配置
+    if grep -q "^{" "$CADDYFILE"; then
+        print_warning "检测到已存在全局配置块"
         echo ""
-        echo "✅ 当前状态："
-        echo "  - HTTP/3 (QUIC): 已启用"
-        echo "  - UDP 443: 正在监听"
-        echo "  - 自动 HTTPS: 已启用"
-        echo "  - 协议支持: HTTP/1.1, HTTP/2, HTTP/3"
+        echo "当前 Caddyfile 已包含全局配置，无法自动优化。"
         echo ""
-        echo "🔍 验证方法："
-        echo "  1. 在线测试: https://http3check.net/"
-        echo "  2. curl 测试: curl -I --http3-only https://你的域名"
-        echo "  3. 浏览器 DevTools 查看 Protocol 列"
+        echo "📖 手动优化指南："
+        echo "=========================================="
+        echo "1. 编辑配置文件："
+        echo "   nano $CADDYFILE"
         echo ""
-    else
-        print_warning "HTTP/3 未检测到（UDP 443 未监听）"
+        echo "2. 确保全局配置在文件开头："
         echo ""
-        echo "可能原因："
-        echo "  1. 防火墙阻止 UDP 443"
-        echo "  2. Caddy 服务未启动"
-        echo "  3. 配置错误"
+        cat <<'EXAMPLE'
+{
+    servers {
+        protocol {
+            experimental_http3
+        }
+    }
+}
+
+# 然后是你的域名配置...
+EXAMPLE
         echo ""
+        echo "3. 保存后执行："
+        echo "   caddy validate --config $CADDYFILE"
+        echo "   systemctl restart caddy"
+        echo "=========================================="
+        return
     fi
     
-    echo "=========================================="
-    print_info "配置优化建议"
-    echo "=========================================="
-    echo ""
+    read -p "是否应用优化？(y/N): " confirm
     
-    echo "Caddy v2.10+ 默认已启用 HTTP/3，无需额外配置"
-    echo ""
-    echo "可选优化："
-    echo "  1. 格式化配置文件"
-    echo "  2. 开放防火墙 UDP 443"
-    echo "  3. 启用 BBR 拥塞控制"
-    echo ""
-    
-    read -p "是否格式化 Caddyfile？(Y/n): " format
-    if [ "$format" != "n" ] && [ "$format" != "N" ]; then
-        backup_config
-        caddy fmt --overwrite "$CADDYFILE"
-        print_success "配置已格式化"
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        print_info "已取消"
+        return
     fi
+    
+    backup_config
+    
+    print_info "正在应用性能优化..."
+    
+    # 创建临时文件
+    local temp_file="/tmp/caddyfile_opt_$$"
+    
+    # 写入优化的全局配置
+    cat > "$temp_file" <<'CONF'
+# ============================================
+# Caddy 全局配置 - 性能优化
+# ============================================
+{
+    # HTTP/3 支持（实验性）
+    servers {
+        protocol {
+            experimental_http3
+        }
+    }
+}
+
+# ============================================
+# 域名配置
+# ============================================
+
+CONF
+    
+    # 追加原有配置
+    cat "$CADDYFILE" >> "$temp_file"
+    
+    # 替换原文件
+    mv "$temp_file" "$CADDYFILE"
+    
+    print_success "性能优化配置已添加"
+    echo ""
+    echo "优化内容："
+    echo "  ✅ HTTP/3 (QUIC) - 已启用"
+    echo "  ✅ 自动 HTTPS - 默认启用"
+    echo "  ✅ 自动证书续期 - 默认启用"
+    echo ""
+    
+    # 发送通知
+    send_telegram "⚡ <b>性能优化已应用</b>
+
+✅ HTTP/3 已启用
+⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+    
+    DOMAIN="optimized"
+    apply_config
 }
 
 # ============================================
 # 主循环
 # ============================================
 
+# 主循环
 while true; do
     show_menu
     read -p "请选择操作 [0-31]: " choice
@@ -1788,6 +1760,7 @@ while true; do
         31) domain_statistics ;;
         0) 
             print_info "退出脚本"
+            # 发送退出通知
             send_telegram "👋 <b>Caddy 管理脚本</b>
 
 管理会话已结束
