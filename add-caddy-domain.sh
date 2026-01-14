@@ -1616,7 +1616,7 @@ test_dns() {
     fi
 }
 
-# 22. 性能优化
+# 22. 性能优化（完全修复版）
 optimize_performance() {
     echo ""
     print_info "Caddy 性能优化"
@@ -1631,16 +1631,57 @@ optimize_performance() {
     if grep -q "^{" "$CADDYFILE"; then
         print_warning "检测到已存在全局配置块"
         echo ""
-        echo "当前 Caddyfile 已包含全局配置，无法自动优化。"
+        
+        # 检查是否已经启用了 HTTP/3
+        if grep -q "experimental_http3" "$CADDYFILE"; then
+            print_info "HTTP/3 已经启用，无需重复配置"
+            return 0
+        fi
+        
+        echo "当前 Caddyfile 已包含全局配置。"
         echo ""
-        echo "📖 手动优化指南："
-        echo "=========================================="
-        echo "1. 编辑配置文件："
-        echo "   nano $CADDYFILE"
+        echo "选择操作："
+        echo "  1. 在现有全局配置中添加 HTTP/3（推荐）"
+        echo "  2. 查看手动配置指南"
+        echo "  3. 取消操作"
         echo ""
-        echo "2. 确保全局配置在文件开头："
-        echo ""
-        cat <<'EXAMPLE'
+        read -p "请选择 [1-3]: " opt_choice
+        
+        case $opt_choice in
+            1)
+                print_info "正在添加 HTTP/3 配置..."
+                backup_config
+                
+                # 在全局配置的 { 后面插入 servers 配置
+                sed -i '/^{$/a\
+    # 性能优化 - HTTP/3\
+    servers {\
+        protocol {\
+            experimental_http3\
+        }\
+    }' "$CADDYFILE"
+                
+                print_success "已添加 HTTP/3 配置"
+                
+                # 发送通知
+                send_telegram "⚡ <b>性能优化已应用</b>
+
+✅ HTTP/3 已启用
+⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+                
+                DOMAIN="optimized"
+                apply_config
+                ;;
+            2)
+                echo ""
+                echo "📖 手动优化指南："
+                echo "=========================================="
+                echo "1. 编辑配置文件："
+                echo "   nano $CADDYFILE"
+                echo ""
+                echo "2. 在全局配置块中添加 servers 配置："
+                echo ""
+                cat <<'EXAMPLE'
 {
     servers {
         protocol {
@@ -1651,14 +1692,20 @@ optimize_performance() {
 
 # 然后是你的域名配置...
 EXAMPLE
-        echo ""
-        echo "3. 保存后执行："
-        echo "   caddy validate --config $CADDYFILE"
-        echo "   systemctl restart caddy"
-        echo "=========================================="
+                echo ""
+                echo "3. 保存后执行："
+                echo "   caddy validate --config $CADDYFILE"
+                echo "   systemctl restart caddy"
+                echo "=========================================="
+                ;;
+            3)
+                print_info "已取消"
+                ;;
+        esac
         return
     fi
     
+    # 如果没有全局配置，则创建新的
     read -p "是否应用优化？(y/N): " confirm
     
     if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
