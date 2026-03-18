@@ -1,16 +1,22 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# ========================================
+# HY2 + SOCKS5 Combined Edition
+# HY2: apernet/hysteria 独立运行
+# SOCKS5: sing-box 独立运行
+# Date: 2026-03-18
+# ========================================
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}   HY2 + SOCKS5 一键安装（无交互）${NC}"
-echo -e "${GREEN}========================================${NC}"
+GREEN_BG='\033[42;30m'
+RED_BG='\033[41;97m'
+YELLOW_BG='\033[43;30m'
+WHITE_BG='\033[47;30m'
+BLUE_BG='\033[44;97m'
+CYAN_BG='\033[46;30m'
+NORMAL='\033[0m'
 
-# 固定参数
+HOSTNAME="$(hostname)"
 HY2_PORT="52015"
 HY2_PASSWORD="Aq112211!"
 SNI_DOMAIN="icloud.cdn-apple.com"
@@ -19,141 +25,410 @@ SOCKS_PORT="40443"
 SOCKS_USER="soga"
 SOCKS_PASS="sogasoga"
 
-INSTALL_DIR="/opt/sing-box"
-CERT_DIR="${INSTALL_DIR}/cert"
-CONFIG_FILE="${INSTALL_DIR}/config.json"
-SERVICE_FILE="/etc/systemd/system/sing-box.service"
+HY2_DIR="/opt/skim-hy2"
+SB_DIR="/opt/sing-box"
+HY2_SERVICE="hy2-${HY2_PORT}"
+SB_SERVICE="sing-box"
+
+# 可选 Telegram 推送
+BOT_TOKEN="${BOT_TOKEN:-}"
+CHAT_ID="${CHAT_ID:-}"
 
 # root 检查
-if [ "$(id -u)" != "0" ]; then
-  echo -e "${RED}[错误] 请使用 root 运行此脚本${NC}"
+if [[ "${EUID}" -ne 0 ]]; then
+  echo -e "${RED_BG}This script requires root privileges.${NORMAL} Please run as root."
   exit 1
 fi
 
 # 架构检测
-ARCH_RAW="$(uname -m)"
-case "$ARCH_RAW" in
-  x86_64) ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-  armv7l) ARCH="armv7" ;;
+cpu_arch="$(uname -m)"
+case "${cpu_arch}" in
+  x86_64) HY2_ARCH="amd64"; SB_ARCH="amd64" ;;
+  aarch64|arm64) HY2_ARCH="arm64"; SB_ARCH="arm64" ;;
+  armv7l) HY2_ARCH="arm"; SB_ARCH="armv7" ;;
   *)
-    echo -e "${RED}[错误] 不支持的架构: ${ARCH_RAW}${NC}"
+    echo -e "${RED_BG}Unsupported architecture: ${cpu_arch}${NORMAL}"
     exit 1
     ;;
 esac
 
-install_deps() {
-  echo -e "${GREEN}[信息] 安装依赖中...${NC}"
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update
-    apt-get install -y curl wget jq tar gzip openssl ca-certificates
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y curl wget jq tar gzip openssl ca-certificates
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y curl wget jq tar gzip openssl ca-certificates
-  elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache curl wget jq tar gzip openssl ca-certificates
+get_server_region() {
+  local region city country cf_colo
+  region="$(curl -s --max-time 5 https://ipinfo.io/region 2>/dev/null || true)"
+  city="$(curl -s --max-time 5 https://ipinfo.io/city 2>/dev/null || true)"
+  country="$(curl -s --max-time 5 https://ipinfo.io/country 2>/dev/null || true)"
+
+  if [[ -n "${city}" && -n "${country}" ]]; then
+    echo "${city}, ${country}"
+  elif [[ -n "${region}" ]]; then
+    echo "${region}"
+  elif [[ -n "${country}" ]]; then
+    echo "${country}"
   else
-    echo -e "${RED}[错误] 未识别的包管理器，请手动安装 curl/wget/jq/tar/openssl${NC}"
+    cf_colo="$(curl -s --max-time 5 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -oP '(?<=colo=)[A-Z]{3}' || true)"
+    echo "${cf_colo:-Unknown}"
+  fi
+}
+REGION="$(get_server_region)"
+
+is_busybox_grep() {
+  grep --version 2>&1 | grep -q BusyBox
+}
+
+install_packages() {
+  if command -v apk >/dev/null 2>&1; then
+    apk update && apk add curl jq tar openssl xz grep wget ca-certificates
+  elif command -v apt-get >/dev/null 2>&1; then
+    apt-get update && apt-get install -y curl jq tar openssl xz-utils grep wget ca-certificates
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Syu --noconfirm curl jq tar openssl xz grep wget ca-certificates
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl jq tar openssl xz grep wget ca-certificates
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y curl jq tar openssl xz grep wget ca-certificates
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper install -y curl jq tar openssl xz grep wget ca-certificates
+  else
+    echo -e "${RED_BG}[ERROR] Unsupported package manager.${NORMAL}"
     exit 1
   fi
 }
 
-for cmd in curl wget jq tar openssl; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    install_deps
+for tool in curl jq tar openssl xz wget; do
+  if ! command -v "${tool}" >/dev/null 2>&1; then
+    echo -e "${GREEN_BG}[Requirements] Installing missing dependencies...${NORMAL}"
+    install_packages
     break
   fi
 done
 
-detect_ip() {
-  SERVER_IP="$(curl -4 -s --max-time 8 https://api.ipify.org || true)"
-  if [ -z "$SERVER_IP" ]; then
-    SERVER_IP="$(curl -4 -s --max-time 8 https://ipv4.icanhazip.com | tr -d '\n' || true)"
+if is_busybox_grep; then
+  echo -e "${GREEN_BG}[Requirements] BusyBox grep detected. Installing GNU grep.${NORMAL}"
+  install_packages
+fi
+
+urlencode() {
+  local LANG=C
+  local input c
+  if [ -t 0 ]; then
+    input="${1:-}"
+  else
+    input="$(cat)"
   fi
-  if [ -z "$SERVER_IP" ]; then
-    SERVER_IP="$(curl -4 -s --max-time 8 https://ifconfig.me || true)"
+  local length="${#input}"
+  for (( i = 0; i < length; i++ )); do
+    c="${input:i:1}"
+    case $c in
+      [a-zA-Z0-9.~_-]) printf "%s" "$c" ;;
+      $'\n') printf "%%0A" ;;
+      *) printf '%%%02X' "'$c" ;;
+    esac
+  done
+  echo
+}
+
+send_telegram() {
+  local message="$1"
+  [[ -z "${BOT_TOKEN}" || -z "${CHAT_ID}" ]] && return 0
+
+  local api_url="https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
+  local escaped_message
+  escaped_message="$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')"
+
+  local response
+  response="$(curl -s -X POST "$api_url" \
+    -H "Content-Type: application/json" \
+    -d "{\"chat_id\": \"${CHAT_ID}\", \"text\": \"${escaped_message}\", \"parse_mode\": \"Markdown\", \"disable_web_page_preview\": true}" 2>/dev/null || true)"
+
+  if echo "$response" | grep -q '"ok":true'; then
+    echo -e "${GREEN_BG}✅ Configuration pushed to Telegram${NORMAL}"
+  else
+    echo -e "${YELLOW_BG}⚠️ Telegram push skipped or failed${NORMAL}"
   fi
-  if [ -z "$SERVER_IP" ]; then
-    echo -e "${RED}[错误] 自动检测公网 IP 失败${NC}"
+}
+
+get_public_ips() {
+  ipv4="$(curl -s --max-time 6 -4 https://api.ipify.org 2>/dev/null || true)"
+  [[ -z "${ipv4}" ]] && ipv4="$(curl -s --max-time 6 -4 https://ipv4.icanhazip.com 2>/dev/null | tr -d '\n' || true)"
+  [[ -z "${ipv4}" ]] && ipv4="$(curl -s --max-time 6 https://cloudflare.com/cdn-cgi/trace -4 2>/dev/null | grep -oP '(?<=ip=).*' || true)"
+
+  ipv6="$(curl -s --max-time 6 -6 https://api64.ipify.org 2>/dev/null || true)"
+  [[ -z "${ipv6}" ]] && ipv6="$(curl -s --max-time 6 https://cloudflare.com/cdn-cgi/trace -6 2>/dev/null | grep -oP '(?<=ip=).*' || true)"
+
+  ip="${ipv4:-}"
+  if [[ -n "${ipv4}" ]]; then
+    echo -e "${GREEN_BG}[Network] Detected IPv4${NORMAL}: ${ipv4}"
+  else
+    echo -e "${YELLOW_BG}[Network] IPv4 not detected${NORMAL}"
+  fi
+
+  if [[ -n "${ipv6}" ]]; then
+    echo -e "${CYAN_BG}[Network] Detected IPv6${NORMAL}: ${ipv6}"
+  else
+    echo -e "${YELLOW_BG}[Network] IPv6 not detected${NORMAL}"
+  fi
+
+  if [[ -z "${ip}" ]]; then
+    echo -e "${RED_BG}[ERROR] Unable to detect IPv4 automatically.${NORMAL}"
     exit 1
   fi
-  echo -e "${GREEN}[信息] 检测到服务器 IP: ${SERVER_IP}${NC}"
+}
+
+get_latest_hy2_version() {
+  local latest_version
+  latest_version="$(curl -s "https://api.github.com/repos/apernet/hysteria/releases/latest" | jq -r .tag_name 2>/dev/null || true)"
+  if [[ "${latest_version}" == "null" || -z "${latest_version}" ]]; then
+    echo "app/v2.6.5"
+  else
+    echo "${latest_version}"
+  fi
+}
+
+download_hy2_core() {
+  mkdir -p "${HY2_DIR}"
+  local version="$1"
+  local url="https://github.com/apernet/hysteria/releases/download/${version}/hysteria-linux-${HY2_ARCH}"
+  echo -e "${GREEN_BG}[HY2] Downloading ${url}${NORMAL}"
+  curl -fsSL -o "${HY2_DIR}/hy2" "${url}"
+  chmod +x "${HY2_DIR}/hy2"
+  echo -e "${GREEN_BG}[HY2] Core installed to ${HY2_DIR}/hy2${NORMAL}"
+}
+
+install_or_update_hy2() {
+  local version
+  version="$(get_latest_hy2_version)"
+
+  if [[ -x "${HY2_DIR}/hy2" ]]; then
+    local installed_version
+    installed_version="$("${HY2_DIR}/hy2" version 2>/dev/null | grep -i '^Version:' | awk '{print $2}' || true)"
+    if [[ "app/${installed_version}" == "${version}" ]]; then
+      echo -e "${GREEN_BG}[HY2] ${version} already installed. Skipping.${NORMAL}"
+    else
+      echo -e "${GREEN_BG}[HY2] Updating ${installed_version:-unknown} -> ${version}${NORMAL}"
+      download_hy2_core "${version}"
+    fi
+  else
+    echo -e "${GREEN_BG}[HY2] Core not found. Installing...${NORMAL}"
+    download_hy2_core "${version}"
+  fi
+}
+
+get_latest_singbox_version() {
+  curl -s "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | jq -r .tag_name 2>/dev/null || true
 }
 
 install_or_update_singbox() {
-  echo -e "${GREEN}[信息] 获取 sing-box 最新版本...${NC}"
-  VERSION="$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)"
-
-  if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
-    echo -e "${RED}[错误] 获取 sing-box 最新版本失败${NC}"
+  local version file url tmpdir
+  version="$(get_latest_singbox_version)"
+  if [[ -z "${version}" || "${version}" == "null" ]]; then
+    echo -e "${RED_BG}[ERROR] Unable to fetch sing-box latest version.${NORMAL}"
     exit 1
   fi
 
-  mkdir -p /tmp/sing-box-install
-  cd /tmp/sing-box-install
+  tmpdir="$(mktemp -d)"
+  file="sing-box-${version#v}-linux-${SB_ARCH}.tar.gz"
+  url="https://github.com/SagerNet/sing-box/releases/download/${version}/${file}"
 
-  FILE="sing-box-${VERSION#v}-linux-${ARCH}.tar.gz"
-  URL="https://github.com/SagerNet/sing-box/releases/download/${VERSION}/${FILE}"
+  echo -e "${GREEN_BG}[Sing-box] Downloading ${url}${NORMAL}"
+  curl -fsSL -o "${tmpdir}/${file}" "${url}"
+  tar -xzf "${tmpdir}/${file}" -C "${tmpdir}"
 
-  echo -e "${GREEN}[信息] 下载 ${VERSION} ...${NC}"
-  wget -O "${FILE}" "$URL"
-
-  tar -xzf "${FILE}"
-  BIN_PATH="$(find . -type f -name sing-box | head -n 1)"
-
-  if [ -z "$BIN_PATH" ]; then
-    echo -e "${RED}[错误] sing-box 可执行文件未找到${NC}"
+  local bin_path
+  bin_path="$(find "${tmpdir}" -type f -name sing-box | head -n 1)"
+  if [[ -z "${bin_path}" ]]; then
+    echo -e "${RED_BG}[ERROR] sing-box binary not found.${NORMAL}"
+    rm -rf "${tmpdir}"
     exit 1
   fi
 
-  install -m 755 "$BIN_PATH" /usr/local/bin/sing-box
-  mkdir -p "${INSTALL_DIR}"
-
-  echo -e "${GREEN}[成功] sing-box 已安装/更新到: ${VERSION}${NC}"
+  install -m 755 "${bin_path}" /usr/local/bin/sing-box
+  rm -rf "${tmpdir}"
+  echo -e "${GREEN_BG}[Sing-box] Installed/updated to ${version}${NORMAL}"
 }
 
-generate_cert() {
-  mkdir -p "${CERT_DIR}"
+apply_network_optimization() {
+  local current_cc
+  current_cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
 
-  if [ ! -f "${CERT_DIR}/cert.pem" ] || [ ! -f "${CERT_DIR}/key.pem" ]; then
-    echo -e "${GREEN}[信息] 生成自签证书...${NC}"
-    openssl req -x509 -newkey rsa:2048 -nodes \
-      -keyout "${CERT_DIR}/key.pem" \
-      -out "${CERT_DIR}/cert.pem" \
-      -days 3650 \
-      -subj "/C=US/ST=California/L=Cupertino/O=Apple Inc./OU=Apple CDN/CN=${SNI_DOMAIN}" >/dev/null 2>&1
+  if [[ "${current_cc}" == "bbr" ]] && grep -q "Hysteria2 Network Optimization" /etc/sysctl.conf 2>/dev/null; then
+    echo -e "${GREEN_BG}[Optimization] BBR and UDP optimization already applied${NORMAL}"
   else
-    echo -e "${YELLOW}[信息] 证书已存在，跳过生成${NC}"
+    echo -e "${GREEN_BG}[Optimization] Applying BBR + UDP performance optimizations...${NORMAL}"
+
+    if ! grep -q "Hysteria2 Network Optimization" /etc/sysctl.conf 2>/dev/null; then
+      cat >> /etc/sysctl.conf <<EOF
+
+# ============================================
+# Hysteria2 Network Optimization
+# Hostname: ${HOSTNAME}
+# Date: $(date '+%Y-%m-%d %H:%M:%S')
+# ============================================
+
+net.core.default_qdisc=fq_pie
+net.ipv4.tcp_congestion_control=bbr
+
+net.core.rmem_max=67108864
+net.core.wmem_max=67108864
+net.ipv4.tcp_rmem=4096 16777216 67108864
+net.ipv4.tcp_wmem=4096 16777216 67108864
+
+net.netfilter.nf_conntrack_max=1000000
+net.nf_conntrack_max=1000000
+
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_fastopen=3
+net.ipv4.tcp_slow_start_after_idle=0
+net.ipv4.tcp_fin_timeout=15
+
+fs.file-max=1048576
+
+# UDP Optimization
+net.core.rmem_default=26214400
+net.core.wmem_default=26214400
+net.ipv4.udp_mem=8388608 12582912 16777216
+net.ipv4.udp_rmem_min=16384
+net.ipv4.udp_wmem_min=16384
+
+net.core.netdev_max_backlog=30000
+net.core.netdev_budget=600
+net.core.netdev_budget_usecs=8000
+
+net.ipv4.ip_local_port_range=10000 65535
+
+net.ipv4.tcp_timestamps=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_low_latency=1
+net.ipv4.tcp_frto=2
+
+net.ipv4.tcp_syncookies=1
+net.ipv4.tcp_syn_retries=2
+net.ipv4.tcp_synack_retries=2
+net.ipv4.tcp_max_syn_backlog=8192
+
+EOF
+    fi
+
+    if sysctl -p >/dev/null 2>&1; then
+      echo -e "${GREEN_BG}[Optimization] sysctl applied successfully${NORMAL}"
+    else
+      echo -e "${YELLOW_BG}[Optimization] sysctl partially applied, some keys may be unsupported${NORMAL}"
+    fi
+
+    if ! grep -q "Hysteria2 Optimization" /etc/security/limits.conf 2>/dev/null; then
+      cat >> /etc/security/limits.conf <<EOF
+
+# Hysteria2 Optimization
+* soft nofile 1048576
+* hard nofile 1048576
+
+EOF
+    fi
   fi
 }
 
-write_config() {
-  mkdir -p "${INSTALL_DIR}"
+prepare_hy2_cert_and_config() {
+  mkdir -p "${HY2_DIR}/${HY2_PORT}"
 
-  cat > "${CONFIG_FILE}" <<EOF
+  cat > "${HY2_DIR}/${HY2_PORT}/openssl.conf" <<EOF
+[ req ]
+default_bits           = 2048
+prompt                 = no
+default_md             = sha256
+distinguished_name     = dn
+x509_extensions        = v3_ext
+
+[ dn ]
+C                      = US
+ST                     = California
+L                      = Cupertino
+O                      = Apple Inc.
+OU                     = Apple CDN
+CN                     = ${SNI_DOMAIN}
+
+[ v3_ext ]
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = ${SNI_DOMAIN}
+DNS.2 = *.${SNI_DOMAIN}
+EOF
+
+  openssl req -x509 -new -nodes -days 36500 \
+    -keyout "${HY2_DIR}/${HY2_PORT}/server.key" \
+    -out "${HY2_DIR}/${HY2_PORT}/server.crt" \
+    -config "${HY2_DIR}/${HY2_PORT}/openssl.conf" \
+    >/dev/null 2>&1
+
+  chmod 600 "${HY2_DIR}/${HY2_PORT}/server.key"
+  chmod 644 "${HY2_DIR}/${HY2_PORT}/server.crt"
+
+  cat > "${HY2_DIR}/${HY2_PORT}/config.yaml" <<EOF
+listen: :${HY2_PORT}
+
+tls:
+  cert: ${HY2_DIR}/${HY2_PORT}/server.crt
+  key: ${HY2_DIR}/${HY2_PORT}/server.key
+
+auth:
+  type: password
+  password: ${HY2_PASSWORD}
+
+quic:
+  initStreamReceiveWindow: 33554432
+  maxStreamReceiveWindow: 33554432
+  initConnReceiveWindow: 67108864
+  maxConnReceiveWindow: 67108864
+  maxIdleTimeout: 60s
+  maxIncomingStreams: 2048
+  disablePathMTUDiscovery: false
+
+disableUDP: false
+udpIdleTimeout: 60s
+
+speedTest: false
+
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.apple.com
+    rewriteHost: true
+EOF
+}
+
+write_hy2_service() {
+  cat > "/etc/systemd/system/${HY2_SERVICE}.service" <<EOF
+[Unit]
+Description=Hysteria 2 Server (${HOSTNAME} - Port ${HY2_PORT})
+After=network.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment="HYSTERIA_LOG_LEVEL=info"
+ExecStart=${HY2_DIR}/hy2 server -c ${HY2_DIR}/${HY2_PORT}/config.yaml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+StandardOutput=append:/var/log/${HY2_SERVICE}.log
+StandardError=append:/var/log/${HY2_SERVICE}.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+write_singbox_config() {
+  mkdir -p "${SB_DIR}"
+
+  cat > "${SB_DIR}/config.json" <<EOF
 {
   "log": {
     "level": "info"
   },
   "inbounds": [
-    {
-      "type": "hysteria2",
-      "tag": "hy2-in",
-      "listen": "::",
-      "listen_port": ${HY2_PORT},
-      "users": [
-        {
-          "password": "${HY2_PASSWORD}"
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "certificate_path": "${CERT_DIR}/cert.pem",
-        "key_path": "${CERT_DIR}/key.pem"
-      },
-      "masquerade": "https://www.apple.com"
-    },
     {
       "type": "socks",
       "tag": "socks-in",
@@ -175,19 +450,17 @@ write_config() {
   ]
 }
 EOF
-
-  echo -e "${GREEN}[成功] 配置已写入: ${CONFIG_FILE}${NC}"
 }
 
-write_service() {
-  cat > "${SERVICE_FILE}" <<EOF
+write_singbox_service() {
+  cat > "/etc/systemd/system/${SB_SERVICE}.service" <<EOF
 [Unit]
 Description=sing-box service
 After=network.target nss-lookup.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/sing-box run -c ${CONFIG_FILE}
+ExecStart=/usr/local/bin/sing-box run -c ${SB_DIR}/config.json
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -195,60 +468,213 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-
-  systemctl daemon-reload
-  systemctl enable sing-box >/dev/null 2>&1
-  systemctl restart sing-box
 }
 
-check_service() {
-  sleep 2
-  if systemctl is-active --quiet sing-box; then
-    echo -e "${GREEN}[成功] sing-box 服务已启动${NC}"
+port_in_use_by_other() {
+  local port="$1"
+  local own_name="$2"
+  if ss -tulnp 2>/dev/null | grep -q ":${port} "; then
+    if ss -tulnp 2>/dev/null | grep ":${port} " | grep -vq "${own_name}"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+stop_conflicting_services() {
+  if port_in_use_by_other "${HY2_PORT}" "${HY2_SERVICE}"; then
+    echo -e "${YELLOW_BG}[WARNING] Port ${HY2_PORT} is in use. Trying to stop old HY2 service...${NORMAL}"
+    systemctl stop "${HY2_SERVICE}" 2>/dev/null || true
+    pkill -f "${HY2_DIR}/hy2" 2>/dev/null || true
+    sleep 1
+  fi
+
+  if port_in_use_by_other "${SOCKS_PORT}" "sing-box"; then
+    echo -e "${YELLOW_BG}[WARNING] Port ${SOCKS_PORT} is in use. Trying to stop old sing-box service...${NORMAL}"
+    systemctl stop "${SB_SERVICE}" 2>/dev/null || true
+    pkill -f "/usr/local/bin/sing-box" 2>/dev/null || true
+    sleep 1
+  fi
+}
+
+start_services() {
+  systemctl daemon-reload
+
+  systemctl enable "${HY2_SERVICE}" >/dev/null 2>&1
+  systemctl restart "${HY2_SERVICE}"
+
+  systemctl enable "${SB_SERVICE}" >/dev/null 2>&1
+  systemctl restart "${SB_SERVICE}"
+
+  sleep 3
+
+  if systemctl is-active --quiet "${HY2_SERVICE}"; then
+    echo -e "${GREEN_BG}[Service] ${HY2_SERVICE} started successfully${NORMAL}"
   else
-    echo -e "${RED}[错误] sing-box 启动失败，日志如下：${NC}"
-    journalctl -u sing-box -n 50 --no-pager
+    echo -e "${RED_BG}[ERROR] ${HY2_SERVICE} failed to start${NORMAL}"
+    journalctl -u "${HY2_SERVICE}" -n 30 --no-pager || true
+    exit 1
+  fi
+
+  if systemctl is-active --quiet "${SB_SERVICE}"; then
+    echo -e "${GREEN_BG}[Service] ${SB_SERVICE} started successfully${NORMAL}"
+  else
+    echo -e "${RED_BG}[ERROR] ${SB_SERVICE} failed to start${NORMAL}"
+    journalctl -u "${SB_SERVICE}" -n 30 --no-pager || true
     exit 1
   fi
 }
 
-print_result() {
-  cat <<EOF
+generate_client_configs() {
+  hy2_url_v4="hysteria2://$(urlencode "${HY2_PASSWORD}")@${ip}:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}")"
+  hy2_url_compat_v4="hy2://$(urlencode "${HY2_PASSWORD}")@${ip}:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}")"
 
+  if [[ -n "${ipv6:-}" ]]; then
+    hy2_url_v6="hysteria2://$(urlencode "${HY2_PASSWORD}")@[${ipv6}]:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}-IPv6")"
+    hy2_url_compat_v6="hy2://$(urlencode "${HY2_PASSWORD}")@[${ipv6}]:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}-IPv6")"
+  fi
+
+  json_config=$(cat <<EOF
+{
+  "type": "hysteria2",
+  "tag": "${HOSTNAME}-HY2-${HY2_PORT}",
+  "server": "${ip}",
+  "server_port": ${HY2_PORT},
+  "password": "${HY2_PASSWORD}",
+  "tls": {
+    "enabled": true,
+    "server_name": "${SNI_DOMAIN}",
+    "insecure": true,
+    "alpn": ["h3"]
+  }
+}
+EOF
+)
+
+  clash_config=$(cat <<EOF
+- name: ${HOSTNAME}-HY2-${HY2_PORT}
+  type: hysteria2
+  server: ${ip}
+  port: ${HY2_PORT}
+  password: ${HY2_PASSWORD}
+  skip-cert-verify: true
+  sni: ${SNI_DOMAIN}
+  alpn:
+    - h3
+EOF
+)
+
+  cat > "${HY2_DIR}/${HY2_PORT}/client-config.txt" <<EOF
 ========================================
-安装完成
-========================================
+HY2 + SOCKS5 客户端配置
+主机名: ${HOSTNAME}
+地区: ${REGION}
+服务器 IPv4: ${ip}:${HY2_PORT}
+$([ -n "${ipv6:-}" ] && echo "服务器 IPv6: [${ipv6}]:${HY2_PORT}")
 
-服务器 IP: ${SERVER_IP}
-
-[HY2 信息]
+[HY2]
 端口: ${HY2_PORT}
 密码: ${HY2_PASSWORD}
 SNI: ${SNI_DOMAIN}
 
-HY2 链接:
-hysteria2://${HY2_PASSWORD}@${SERVER_IP}:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#HY2-${SERVER_IP}
-
-[SOCKS5 信息]
+[SOCKS5]
+服务器: ${ip}
 端口: ${SOCKS_PORT}
 用户名: ${SOCKS_USER}
 密码: ${SOCKS_PASS}
 
-管理命令:
-systemctl status sing-box
-systemctl restart sing-box
-journalctl -u sing-box -f
+========================================
+【Sing-box 配置 IPv4】
+${json_config}
 
-配置文件:
-${CONFIG_FILE}
+【Clash Meta 配置 IPv4】
+${clash_config}
 
+========================================
+【v2rayN 链接 IPv4】
+${hy2_url_v4}
+
+【兼容格式链接 IPv4】
+${hy2_url_compat_v4}
+========================================
 EOF
 }
 
-detect_ip
-install_or_update_singbox
-generate_cert
-write_config
-write_service
-check_service
-print_result
+print_result() {
+  echo ""
+  echo -e "${BLUE_BG}========================================${NORMAL}"
+  echo -e "${BLUE_BG}  🎉 HY2 + SOCKS5 安装成功${NORMAL}"
+  echo -e "${BLUE_BG}========================================${NORMAL}"
+  echo ""
+  echo -e "${GREEN_BG}主机名:${NORMAL} ${HOSTNAME}"
+  echo -e "${GREEN_BG}地区:${NORMAL} ${REGION}"
+  echo -e "${GREEN_BG}服务器 IPv4:${NORMAL} ${ip}"
+  [[ -n "${ipv6:-}" ]] && echo -e "${CYAN_BG}服务器 IPv6:${NORMAL} ${ipv6}"
+  echo ""
+  echo -e "${GREEN_BG}[HY2]${NORMAL}"
+  echo "  端口: ${HY2_PORT}"
+  echo "  密码: ${HY2_PASSWORD}"
+  echo "  SNI: ${SNI_DOMAIN}"
+  echo "  链接: ${hy2_url_v4}"
+  echo ""
+  echo -e "${GREEN_BG}[SOCKS5]${NORMAL}"
+  echo "  服务器: ${ip}"
+  echo "  端口: ${SOCKS_PORT}"
+  echo "  用户名: ${SOCKS_USER}"
+  echo "  密码: ${SOCKS_PASS}"
+  echo ""
+  echo -e "${WHITE_BG}管理命令:${NORMAL}"
+  echo "  HY2 状态: systemctl status ${HY2_SERVICE}"
+  echo "  HY2 日志: tail -f /var/log/${HY2_SERVICE}.log"
+  echo "  SOCKS5 状态: systemctl status ${SB_SERVICE}"
+  echo "  SOCKS5 日志: journalctl -u ${SB_SERVICE} -f"
+  echo ""
+  echo -e "${GREEN_BG}配置已保存到:${NORMAL} ${HY2_DIR}/${HY2_PORT}/client-config.txt"
+}
+
+push_summary() {
+  local telegram_message
+  telegram_message=$(cat <<EOF
+🚀 *HY2 + SOCKS5 部署成功*
+
+• 主机名: \`${HOSTNAME}\`
+• 地区: \`${REGION}\`
+• IPv4: \`${ip}\`
+• HY2 端口: \`${HY2_PORT}\`
+• HY2 密码: \`${HY2_PASSWORD}\`
+• SNI: \`${SNI_DOMAIN}\`
+
+• SOCKS5 端口: \`${SOCKS_PORT}\`
+• SOCKS5 用户名: \`${SOCKS_USER}\`
+• SOCKS5 密码: \`${SOCKS_PASS}\`
+
+*HY2 链接*
+\`${hy2_url_v4}\`
+
+时间: $(date '+%Y-%m-%d %H:%M:%S')
+EOF
+)
+  send_telegram "${telegram_message}"
+}
+
+main() {
+  echo -e "${GREEN_BG}========================================${NORMAL}"
+  echo -e "${GREEN_BG}   HY2 + SOCKS5 Combined Installer${NORMAL}"
+  echo -e "${GREEN_BG}========================================${NORMAL}"
+
+  get_public_ips
+  install_or_update_hy2
+  install_or_update_singbox
+  apply_network_optimization
+  prepare_hy2_cert_and_config
+  write_hy2_service
+  write_singbox_config
+  write_singbox_service
+  stop_conflicting_services
+  start_services
+  generate_client_configs
+  print_result
+  push_summary
+}
+
+main "$@"
