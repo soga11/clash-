@@ -1,0 +1,25 @@
+port: 7890
+socks-port: 7891
+allow-lan: true
+mode: rule
+log-level: info
+
+proxies:
+  <%proxies%>
+
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+      - 自动选择
+      <%regionGroupNames%>
+
+  - name: 自动选择
+    type: url-test
+    url: http://www.cloudflare.com/cdn-cgi/trace
+    interval: <%interval%>
+    proxies:
+      <%regionGroupNames%>
+
+rules:
+  <%rules%>
