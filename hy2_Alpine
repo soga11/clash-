@@ -1,0 +1,119 @@
+#!/bin/sh
+
+set -e
+
+echo "==== 自动安装 SOCKS5 + HY2 ===="
+
+# ===== 检测架构 =====
+
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+ARCH="amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+ARCH="arm64"
+else
+echo "不支持架构: $ARCH"
+exit 1
+fi
+
+echo "架构: $ARCH"
+
+# ===== 安装依赖 =====
+
+apk add --no-cache curl tar libc6-compat >/dev/null 2>&1 || true
+
+# ===== 安装 sing-box（SOCKS5）=====
+
+echo "安装 sing-box..."
+
+curl -4 -L -o sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.13.11/sing-box-1.13.11-linux-${ARCH}.tar.gz
+
+tar -xzf sing-box.tar.gz
+cd sing-box-*
+cp sing-box /usr/local/bin/
+cd ..
+rm -rf sing-box*
+
+# ===== 写 SOCKS5 配置 =====
+
+cat > /root/socks.json <<EOF
+{
+"inbounds": [
+{
+"type": "socks",
+"listen": "::",
+"listen_port": 40443,
+"users": [
+{
+"username": "soga",
+"password": "sogasoga"
+}
+]
+}
+],
+"outbounds": [
+{ "type": "direct" }
+]
+}
+EOF
+
+# ===== 创建 SOCKS5 服务 =====
+
+cat > /etc/init.d/socks <<'EOF'
+#!/sbin/openrc-run
+command="/usr/local/bin/sing-box"
+command_args="run -c /root/socks.json"
+command_background=true
+EOF
+
+chmod +x /etc/init.d/socks
+rc-update add socks default
+rc-service socks restart
+
+echo "SOCKS5 已启动 端口:40443"
+
+# ===== 安装 hysteria2 =====
+
+echo "安装 hysteria2..."
+
+curl -4 -L -o hysteria https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-${ARCH}
+chmod +x hysteria
+mv hysteria /usr/local/bin/
+
+# ===== 写 HY2 配置 =====
+
+cat > /root/hy2.yaml <<EOF
+listen: :52015
+
+tls:
+cert: ""
+key: ""
+sni: icloud.cdn-apple.com
+insecure: true
+
+auth:
+type: password
+password: Aq112211!
+
+masquerade:
+type: proxy
+proxy:
+url: https://icloud.cdn-apple.com
+EOF
+
+# ===== 创建 HY2 服务 =====
+
+cat > /etc/init.d/hy2 <<'EOF'
+#!/sbin/openrc-run
+command="/usr/local/bin/hysteria"
+command_args="server -c /root/hy2.yaml"
+command_background=true
+EOF
+
+chmod +x /etc/init.d/hy2
+rc-update add hy2 default
+rc-service hy2 restart
+
+echo "HY2 已启动 端口:52015"
+
+echo "==== 完成 ===="
