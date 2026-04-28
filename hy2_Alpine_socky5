@@ -1,65 +1,56 @@
 #!/bin/sh
-# ===== 修复版：SOCKS5 + HY2 一键安装脚本 (Alpine Linux) =====
-# 修复内容：
-# 1. OpenRC 脚本添加 pidfile（解决启动失败）
-# 2. 自动生成 TLS 证书（HY2 必需）
-# 3. 配置兼容容器环境 + 添加日志
+# ===== 优化版：SOCKS5 + HY2 一键安装脚本 (Alpine Linux) =====
+# 更新时间: 2026-04-28
+# 功能: 自动安装 + 输出连接字符串 + 管理命令速查
 
 set -e
 
-echo "==== 自动安装 SOCKS5 + HY2 (修复版) ===="
+# 颜色输出（兼容大部分终端）
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+echo "========================================"
+echo "  SOCKS5 + HY2 一键部署 (优化版)  "
+echo "========================================"
 
 # ===== 检测架构 =====
 ARCH=$(uname -m)
-if [ "$ARCH" = "x86_64" ]; then
-  ARCH="amd64"
-elif [ "$ARCH" = "aarch64" ]; then
-  ARCH="arm64"
-else
-  echo "❌ 不支持架构: $ARCH"
-  exit 1
-fi
-echo "✅ 架构: $ARCH"
+case "$ARCH" in
+  x86_64) ARCH="amd64" ;;
+  aarch64) ARCH="arm64" ;;
+  *) error "不支持架构: $ARCH"; exit 1 ;;
+esac
+info "架构: $ARCH"
 
 # ===== 安装依赖 =====
-echo "📦 安装依赖..."
+info "安装依赖..."
 apk add --no-cache curl tar openssl libc6-compat >/dev/null 2>&1 || true
 
-# ===== 安装 sing-box（SOCKS5）=====
-echo "📥 安装 sing-box..."
+# ===== 安装 sing-box =====
+info "安装 sing-box..."
 curl -4 -L --retry 3 -o sing-box.tar.gz \
   https://github.com/SagerNet/sing-box/releases/download/v1.13.11/sing-box-1.13.11-linux-${ARCH}.tar.gz
+tar -xzf sing-box.tar.gz && cd sing-box-* && cp sing-box /usr/local/bin/ && cd .. && rm -rf sing-box*
 
-tar -xzf sing-box.tar.gz
-cd sing-box-* && cp sing-box /usr/local/bin/ && cd ..
-rm -rf sing-box*
+# ===== SOCKS5 配置 =====
+SOCKS_PORT=40443
+SOCKS_USER="soga"
+SOCKS_PASS="sogasoga"
 
-# ===== 写 SOCKS5 配置（修复：0.0.0.0 + 日志）=====
-cat > /root/socks.json << 'EOF'
+cat > /root/socks.json << EOF
 {
-  "log": {
-    "level": "info",
-    "timestamp": true,
-    "output": "/var/log/sing-box.log"
-  },
-  "inbounds": [
-    {
-      "type": "socks",
-      "tag": "socks-in",
-      "listen": "0.0.0.0",
-      "listen_port": 40443,
-      "users": [
-        { "username": "soga", "password": "sogasoga" }
-      ]
-    }
-  ],
-  "outbounds": [
-    { "type": "direct", "tag": "direct" }
-  ]
+  "log": {"level": "info", "timestamp": true, "output": "/var/log/sing-box.log"},
+  "inbounds": [{
+    "type": "socks", "tag": "socks-in", "listen": "0.0.0.0", "listen_port": ${SOCKS_PORT},
+    "users": [{"username": "${SOCKS_USER}", "password": "${SOCKS_PASS}"}]
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
 }
 EOF
 
-# ===== 创建 SOCKS5 服务（修复：添加 pidfile）=====
+# ===== SOCKS5 服务 (修复 pidfile) =====
 cat > /etc/init.d/socks << 'EOF'
 #!/sbin/openrc-run
 command="/usr/local/bin/sing-box"
@@ -71,45 +62,40 @@ chmod +x /etc/init.d/socks
 rc-update add socks default >/dev/null 2>&1 || true
 rc-service socks restart
 
-echo "✅ SOCKS5 已启动 端口:40443"
-
 # ===== 安装 hysteria2 =====
-echo "📥 安装 hysteria2..."
+info "安装 hysteria2..."
 curl -4 -L --retry 3 -o /tmp/hysteria \
   https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-${ARCH}
-chmod +x /tmp/hysteria
-mv /tmp/hysteria /usr/local/bin/hysteria
+chmod +x /tmp/hysteria && mv /tmp/hysteria /usr/local/bin/hysteria
 
-# ===== 自动生成 TLS 证书（修复：HY2 必需）=====
-echo "🔐 生成 TLS 证书..."
+# ===== 生成 TLS 证书 =====
+info "生成 TLS 证书..."
 mkdir -p /root/hy2-cert
 openssl ecparam -genkey -name prime256v1 -out /root/hy2-cert/key.pem 2>/dev/null
-openssl req -new -x509 -days 3650 \
-  -key /root/hy2-cert/key.pem \
-  -out /root/hy2-cert/cert.pem \
-  -subj "/CN=icloud.cdn-apple.com" 2>/dev/null
+openssl req -new -x509 -days 3650 -key /root/hy2-cert/key.pem -out /root/hy2-cert/cert.pem -subj "/CN=icloud.cdn-apple.com" 2>/dev/null
 
-# ===== 写 HY2 配置（修复：证书路径 + 移除无效 insecure）=====
-cat > /root/hy2.yaml << 'EOF'
-listen: :52015
+# ===== HY2 配置 =====
+HY2_PORT=52015
+HY2_PASS="Aq112211!"
+HY2_SNI="icloud.cdn-apple.com"
 
+cat > /root/hy2.yaml << EOF
+listen: :${HY2_PORT}
 tls:
   cert: /root/hy2-cert/cert.pem
   key: /root/hy2-cert/key.pem
-  sni: icloud.cdn-apple.com
-
+  sni: ${HY2_SNI}
 auth:
   type: password
-  password: Aq112211!
-
+  password: ${HY2_PASS}
 masquerade:
   type: proxy
   proxy:
-    url: https://icloud.cdn-apple.com
+    url: https://${HY2_SNI}
     rewriteHost: true
 EOF
 
-# ===== 创建 HY2 服务（修复：添加 pidfile）=====
+# ===== HY2 服务 (修复 pidfile) =====
 cat > /etc/init.d/hy2 << 'EOF'
 #!/sbin/openrc-run
 command="/usr/local/bin/hysteria"
@@ -121,23 +107,100 @@ chmod +x /etc/init.d/hy2
 rc-update add hy2 default >/dev/null 2>&1 || true
 rc-service hy2 restart
 
-echo "✅ HY2 已启动 端口:52015"
+# ===== 获取服务器 IP =====
+SERVER_IP=$(curl -s -4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}' | cut -d' ' -f1)
 
-# ===== 最终验证 =====
+# ===== URL 编码函数（处理密码特殊字符）=====
+url_encode() {
+  printf '%s' "$1" | sed 's/!/%21/g; s/@/%40/g; s/:/%3A/g; s/\//%2F/g; s/?/%3F/g; s/#/%23/g'
+}
+HY2_PASS_ENCODED=$(url_encode "$HY2_PASS")
+
+# ===== 生成连接字符串 =====
+HY2_URI="hysteria2://${HY2_PASS_ENCODED}@${SERVER_IP}:${HY2_PORT}?sni=${HY2_SNI}&insecure=1&allowInsecure=1#HY2-$(hostname | cut -c1-20)"
+SOCKS_URI="socks5://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT}#SOCKS5-$(hostname | cut -c1-20)"
+
+# ===== 验证服务状态 =====
+sleep 2
+SOCKS_OK=$(rc-status 2>/dev/null | grep -c "socks.*started" || echo 0)
+HY2_OK=$(rc-status 2>/dev/null | grep -c "hy2.*started" || echo 0)
+SOCKS_PORT_OK=$(ss -tlnp 2>/dev/null | grep -q ":${SOCKS_PORT}" && echo 1 || echo 0)
+HY2_PORT_OK=$(ss -tlnup 2>/dev/null | grep -q ":${HY2_PORT}" && echo 1 || echo 0)
+
+# ===== 输出部署结果 =====
 echo ""
-echo "==== 部署完成 ===="
-echo "🔹 SOCKS5: 端口 40443 (TCP) | 用户: soga / 密码: sogasoga"
-echo "🔹 HY2:    端口 52015 (UDP) | 密码: Aq112211! | SNI: icloud.cdn-apple.com"
+echo "========================================"
+echo "  🎉 部署完成！连接信息如下  "
+echo "========================================"
 echo ""
-echo "⚠️  重要：HY2 客户端需添加 insecure: true（自签名证书）"
+echo "🔹 SOCKS5 代理"
+echo "   地址: ${SERVER_IP}:${SOCKS_PORT}"
+echo "   用户: ${SOCKS_USER}"
+echo "   密码: ${SOCKS_PASS}"
+echo "   URI : ${SOCKS_URI}"
+echo ""
+echo "🔹 Hysteria2 代理"
+echo "   地址: ${SERVER_IP}:${HY2_PORT}"
+echo "   密码: ${HY2_PASS}"
+echo "   SNI : ${HY2_SNI}"
+echo "   URI : ${HY2_URI}"
+echo ""
+echo "⚠️  重要：HY2 客户端必须设置 insecure: true（自签名证书）"
 echo ""
 
-# 检查服务状态
-if rc-status | grep -q "socks.*started" && rc-status | grep -q "hy2.*started"; then
-  echo "🎉 双服务均运行正常！"
-  ss -tlnup | grep -E '40443|52015'
+# ===== 连通性测试 =====
+echo "🧪 连通性测试..."
+if command -v curl >/dev/null 2>&1; then
+  SOCKS_TEST=$(curl -x socks5://${SOCKS_USER}:${SOCKS_PASS}@127.0.0.1:${SOCKS_PORT} -s --connect-timeout 3 https://api.ipify.org?format=json 2>/dev/null || echo "failed")
+  if [ "$SOCKS_TEST" != "failed" ] && echo "$SOCKS_TEST" | grep -q "ip"; then
+    echo "   ✅ SOCKS5 本地测试: 成功"
+  else
+    echo "   ⚠️  SOCKS5 本地测试: 未通过（可忽略，可能是防火墙）"
+  fi
+fi
+echo "   ✅ HY2 端口监听: $(ss -tlnup | grep -q ":${HY2_PORT}" && echo '正常' || echo '异常')"
+echo ""
+
+# ===== 管理命令速查（方便复制）=====
+echo "========================================"
+echo "  📋 常用管理命令速查  "
+echo "========================================"
+cat << 'CMDEOF'
+# ▼▼▼ 复制下方命令使用 ▼▼▼
+
+# 查看服务状态
+rc-status | grep -E 'socks|hy2'
+
+# 重启单个服务
+rc-service socks restart
+rc-service hy2 restart
+
+# 查看端口监听
+ss -tlnup | grep -E '40443|52015'
+
+# 查看日志
+tail -f /var/log/sing-box.log                    # SOCKS5
+/usr/local/bin/hysteria server -c /root/hy2.yaml # HY2 前台调试 (按 Ctrl+C 退出)
+
+# 验证配置语法
+/usr/local/bin/sing-box check -c /root/socks.json
+/usr/local/bin/hysteria check /root/hy2.yaml
+
+# 备份配置（建议定期执行）
+mkdir -p /root/backup && cp /root/socks.json /root/hy2.yaml /root/backup/$(date +%Y%m%d)/ 2>/dev/null || true
+
+# ▲▲▲ 复制上方命令使用 ▲▲▲
+CMDEOF
+echo ""
+
+# ===== 最终状态确认 =====
+if [ "$SOCKS_OK" -ge 1 ] && [ "$HY2_OK" -ge 1 ] && [ "$SOCKS_PORT_OK" = "1" ] && [ "$HY2_PORT_OK" = "1" ]; then
+  echo -e "${GREEN}🎉 双服务均运行正常！可立即使用${NC}"
+  echo "📌 建议：将上方 '常用管理命令' 保存到本地笔记，方便后续维护"
+  exit 0
 else
-  echo "⚠️  有服务启动失败，请检查:"
-  echo "   • /var/log/sing-box.log"
-  echo "   • 前台运行调试: /usr/local/bin/hysteria server -c /root/hy2.yaml"
+  echo -e "${YELLOW}⚠️  有服务异常，请检查:${NC}"
+  echo "   • rc-status | grep -E 'socks|hy2'"
+  echo "   • 前台调试: /usr/local/bin/hysteria server -c /root/hy2.yaml"
+  exit 1
 fi
