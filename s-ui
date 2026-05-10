@@ -225,8 +225,10 @@ echo "运行文件: ${SUI_BIN}"
 echo ""
 
 if [ -n "$IPV4" ]; then
+    echo "面板地址：http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
     echo "IPv4 面板地址: http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
 else
+    echo "面板地址：未检测到 IPv4"
     echo "IPv4 面板地址: 未检测到"
 fi
 
@@ -236,6 +238,10 @@ else
     echo "IPv6 面板地址: 未检测到"
 fi
 
+echo ""
+echo "默认账号：admin"
+echo "默认密码：admin"
+echo "安全提示：登录后请立即修改默认账号和密码"
 echo ""
 echo "面板端口: ${PANEL_PORT}"
 echo "订阅端口: ${SUB_PORT}"
@@ -247,7 +253,7 @@ echo "重启: systemctl restart s-ui"
 echo "状态: systemctl status s-ui"
 echo "日志: journalctl -u s-ui -f"
 echo ""
-echo "账号admin密码admin 登录后请立即更改："
+echo "如果无法访问，请检查 AWS 安全组是否放行："
 echo "TCP ${PANEL_PORT}"
 echo "TCP ${SUB_PORT}"
 echo "========================================"
