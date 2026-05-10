@@ -1,154 +1,133 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 set -e
 
 VERSION="S-UI_v1.4.1"
-
-REPO_RELEASE_BASE="https://github.com/soga11/clash-/releases/download/${VERSION}"
+BASE_URL="https://github.com/soga11/clash-/releases/download/${VERSION}"
+INSTALL_DIR="/usr/local/s-ui"
+SERVICE_NAME="s-ui"
 
 PANEL_PORT="2095"
+SUB_PORT="2096"
 PANEL_PATH="/app/login"
-PANEL_USER="admin"
-PANEL_PASS="admin"
 
-SERVICE_NAME="s-ui"
-INSTALL_DIR="/usr/local/s-ui"
-BIN_PATH="${INSTALL_DIR}/s-ui"
+echo "========================================"
+echo "开始安装 S-UI"
+echo "版本: ${VERSION}"
+echo "========================================"
 
-GREEN="\033[0;32m"
-YELLOW="\033[0;33m"
-RED="\033[0;31m"
-PLAIN="\033[0m"
+if [ "$(id -u)" != "0" ]; then
+    echo "请使用 root 用户运行此脚本"
+    echo "例如：sudo bash install.sh"
+    exit 1
+fi
 
-info() {
-    echo -e "${GREEN}[信息]${PLAIN} $1"
-}
+echo "安装基础依赖..."
 
-warn() {
-    echo -e "${YELLOW}[警告]${PLAIN} $1"
-}
+if command -v apt >/dev/null 2>&1; then
+    apt update -y
+    apt install -y wget curl tar ca-certificates
+elif command -v yum >/dev/null 2>&1; then
+    yum install -y wget curl tar ca-certificates
+elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y wget curl tar ca-certificates
+else
+    echo "未检测到 apt/yum/dnf，请确认系统已安装 wget/curl/tar"
+fi
 
-error() {
-    echo -e "${RED}[错误]${PLAIN} $1"
-}
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo "当前系统不支持 systemctl，暂不支持安装"
+    exit 1
+fi
 
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        error "请使用 root 用户运行"
+ARCH=$(uname -m)
+
+case "$ARCH" in
+    x86_64|amd64)
+        FILE="s-ui-linux-amd64.tar.gz"
+        ;;
+    aarch64|arm64)
+        FILE="s-ui-linux-arm64.tar.gz"
+        ;;
+    *)
+        echo "不支持的系统架构: $ARCH"
         exit 1
-    fi
-}
+        ;;
+esac
 
-install_base() {
-    info "正在安装基础依赖..."
+URL="${BASE_URL}/${FILE}"
 
-    if command -v apt >/dev/null 2>&1; then
-        apt update -y
-        apt install -y curl wget tar unzip ca-certificates systemd
-    elif command -v yum >/dev/null 2>&1; then
-        yum install -y curl wget tar unzip ca-certificates
-    elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y curl wget tar unzip ca-certificates
-    else
-        warn "未识别到 apt/yum/dnf，请确认系统已安装 curl wget tar unzip"
-    fi
-}
+echo "检测到系统架构: $ARCH"
+echo "准备下载文件: $FILE"
+echo "下载地址: $URL"
 
-detect_arch() {
-    local arch
-    arch=$(uname -m)
+echo "停止旧服务..."
+systemctl stop ${SERVICE_NAME} 2>/dev/null || true
 
-    case "$arch" in
-        x86_64|amd64)
-            echo "amd64"
-            ;;
-        aarch64|arm64)
-            echo "arm64"
-            ;;
-        *)
-            error "不支持的系统架构: $arch"
-            exit 1
-            ;;
-    esac
-}
+if [ -d "$INSTALL_DIR" ]; then
+    BACKUP_DIR="${INSTALL_DIR}.bak.$(date +%F-%H%M%S)"
+    echo "备份旧版本到: $BACKUP_DIR"
+    cp -a "$INSTALL_DIR" "$BACKUP_DIR"
+fi
 
-stop_old_service() {
-    info "停止旧服务，如果存在..."
+echo "清理旧目录..."
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
 
-    systemctl stop ${SERVICE_NAME} >/dev/null 2>&1 || true
-}
+TMP_DIR=$(mktemp -d)
+cd "$TMP_DIR"
 
-backup_old_install() {
-    if [[ -d "$INSTALL_DIR" ]]; then
-        local backup_dir
-        backup_dir="/usr/local/s-ui-backup-$(date +%Y%m%d%H%M%S)"
-        info "检测到旧安装目录，备份到: ${backup_dir}"
-        cp -a "$INSTALL_DIR" "$backup_dir" || true
-    fi
-}
+echo "开始下载..."
 
-download_and_install() {
-    local arch
-    local url
-    local tmp_dir
-    local package_file
-    local found_bin
+if command -v wget >/dev/null 2>&1; then
+    wget -O "$FILE" "$URL"
+else
+    curl -L --fail -o "$FILE" "$URL"
+fi
 
-    arch=$(detect_arch)
+if [ ! -s "$FILE" ]; then
+    echo "下载失败，文件为空"
+    rm -rf "$TMP_DIR"
+    exit 1
+fi
 
-    if [[ "$arch" == "amd64" ]]; then
-        url="${REPO_RELEASE_BASE}/s-ui-linux-amd64.tar.gz"
-    elif [[ "$arch" == "arm64" ]]; then
-        url="${REPO_RELEASE_BASE}/s-ui-linux-arm64.tar.gz"
-    fi
+echo "下载完成，文件大小："
+ls -lh "$FILE"
 
-    info "当前系统架构: ${arch}"
-    info "下载地址: ${url}"
+echo "开始解压..."
+tar -xzf "$FILE" -C "$INSTALL_DIR"
 
-    tmp_dir=$(mktemp -d)
-    package_file="${tmp_dir}/s-ui.tar.gz"
+echo "查找 sui 可执行文件..."
 
-    curl -L --fail --connect-timeout 15 --max-time 300 -o "$package_file" "$url"
+SUI_BIN=$(find "$INSTALL_DIR" -type f -name "sui" | head -n 1)
 
-    info "正在解压安装包..."
+if [ -z "$SUI_BIN" ]; then
+    echo "未找到 sui 文件，尝试查找可执行文件..."
+    SUI_BIN=$(find "$INSTALL_DIR" -type f -perm /111 | head -n 1)
+fi
 
-    mkdir -p "$tmp_dir/extract"
-    tar -zxf "$package_file" -C "$tmp_dir/extract"
+if [ -z "$SUI_BIN" ]; then
+    echo "未找到 sui 可执行文件，请检查压缩包结构"
+    echo "当前解压文件列表："
+    find "$INSTALL_DIR" -maxdepth 4 -type f
+    rm -rf "$TMP_DIR"
+    exit 1
+fi
 
-    mkdir -p "$INSTALL_DIR"
+SUI_DIR=$(dirname "$SUI_BIN")
 
-    found_bin=$(find "$tmp_dir/extract" -type f \( -name "s-ui" -o -name "s-ui-linux-amd64" -o -name "s-ui-linux-arm64" \) | head -n 1)
+chmod +x "$SUI_BIN"
 
-    if [[ -z "$found_bin" ]]; then
-        warn "没有找到明确的 s-ui 二进制文件，尝试查找可执行文件..."
-        found_bin=$(find "$tmp_dir/extract" -type f -perm /111 | head -n 1)
-    fi
+echo "检测到运行目录: $SUI_DIR"
+echo "检测到运行文件: $SUI_BIN"
 
-    if [[ -z "$found_bin" ]]; then
-        error "安装失败：压缩包里没有找到可执行文件"
-        echo "解压内容如下："
-        find "$tmp_dir/extract" -maxdepth 3 -type f
-        exit 1
-    fi
+if [ -f "$SUI_DIR/s-ui.sh" ]; then
+    chmod +x "$SUI_DIR/s-ui.sh"
+    ln -sf "$SUI_DIR/s-ui.sh" /usr/bin/s-ui
+fi
 
-    info "找到程序文件: ${found_bin}"
+echo "写入 systemd 服务..."
 
-    cp -f "$found_bin" "$BIN_PATH"
-    chmod +x "$BIN_PATH"
-
-    # 如果压缩包里还有其他文件，一并复制过去，避免缺少静态资源
-    cp -a "$tmp_dir/extract"/. "$INSTALL_DIR"/ || true
-    chmod +x "$BIN_PATH"
-
-    rm -rf "$tmp_dir"
-
-    info "S-UI 已安装到: ${BIN_PATH}"
-}
-
-create_systemd_service() {
-    info "正在创建 systemd 服务..."
-
-    cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
+cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
 Description=S-UI Service
 After=network.target nss-lookup.target
@@ -156,165 +135,122 @@ After=network.target nss-lookup.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${BIN_PATH}
+WorkingDirectory=${SUI_DIR}
+ExecStart=${SUI_BIN}
 Restart=on-failure
-RestartSec=5s
+RestartSec=5
 LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable ${SERVICE_NAME} >/dev/null 2>&1
-}
+echo "尝试放行防火墙端口 ${PANEL_PORT} 和 ${SUB_PORT}..."
 
-open_firewall_port() {
-    info "尝试放行面板端口 ${PANEL_PORT}..."
+if command -v ufw >/dev/null 2>&1; then
+    ufw allow ${PANEL_PORT}/tcp >/dev/null 2>&1 || true
+    ufw allow ${SUB_PORT}/tcp >/dev/null 2>&1 || true
+fi
 
-    if command -v ufw >/dev/null 2>&1; then
-        ufw allow ${PANEL_PORT}/tcp >/dev/null 2>&1 || true
-    fi
+if command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port=${PANEL_PORT}/tcp >/dev/null 2>&1 || true
+    firewall-cmd --permanent --add-port=${SUB_PORT}/tcp >/dev/null 2>&1 || true
+    firewall-cmd --reload >/dev/null 2>&1 || true
+fi
 
-    if command -v firewall-cmd >/dev/null 2>&1; then
-        firewall-cmd --permanent --add-port=${PANEL_PORT}/tcp >/dev/null 2>&1 || true
-        firewall-cmd --reload >/dev/null 2>&1 || true
-    fi
+if command -v iptables >/dev/null 2>&1; then
+    iptables -C INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || \
+    iptables -I INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || true
 
-    if command -v iptables >/dev/null 2>&1; then
-        iptables -C INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || \
-        iptables -I INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || true
-    fi
-}
+    iptables -C INPUT -p tcp --dport ${SUB_PORT} -j ACCEPT >/dev/null 2>&1 || \
+    iptables -I INPUT -p tcp --dport ${SUB_PORT} -j ACCEPT >/dev/null 2>&1 || true
+fi
 
-start_service() {
-    info "正在启动 S-UI 服务..."
+echo "启动 S-UI 服务..."
 
-    systemctl restart ${SERVICE_NAME}
+systemctl daemon-reload
+systemctl enable ${SERVICE_NAME} >/dev/null 2>&1
+systemctl restart ${SERVICE_NAME}
 
-    sleep 2
+sleep 2
 
-    if systemctl is-active --quiet ${SERVICE_NAME}; then
-        info "S-UI 服务启动成功"
-    else
-        error "S-UI 服务启动失败，最近日志如下："
-        journalctl -u ${SERVICE_NAME} -n 50 --no-pager
-        exit 1
-    fi
-}
+if systemctl is-active --quiet ${SERVICE_NAME}; then
+    echo "S-UI 服务启动成功"
+else
+    echo "S-UI 服务启动失败，最近日志如下："
+    journalctl -u ${SERVICE_NAME} -n 80 --no-pager
+    rm -rf "$TMP_DIR"
+    exit 1
+fi
 
-get_public_ipv4() {
-    local ip=""
+rm -rf "$TMP_DIR"
 
-    ip=$(curl -4s --max-time 5 https://api.ipify.org 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$ip"
+get_ipv4() {
+    IP=$(curl -4s --max-time 5 https://api.ipify.org 2>/dev/null || true)
+    if echo "$IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        echo "$IP"
         return
     fi
 
-    ip=$(curl -4s --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$ip"
+    IP=$(curl -4s --max-time 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '\n\r' || true)
+    if echo "$IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        echo "$IP"
         return
     fi
 
-    ip=$(curl -4s --max-time 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$ip"
-        return
-    fi
-
-    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$ip"
-    fi
+    hostname -I 2>/dev/null | awk '{print $1}'
 }
 
-get_public_ipv6() {
-    local ip=""
-
-    ip=$(curl -6s --max-time 5 https://api64.ipify.org 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" == *:* ]]; then
-        echo "$ip"
+get_ipv6() {
+    IP=$(curl -6s --max-time 5 https://api64.ipify.org 2>/dev/null || true)
+    if echo "$IP" | grep -q ':'; then
+        echo "$IP"
         return
     fi
 
-    ip=$(curl -6s --max-time 5 https://ipv6.icanhazip.com 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" == *:* ]]; then
-        echo "$ip"
-        return
-    fi
-
-    ip=$(curl -6s --max-time 5 https://ifconfig.co 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" == *:* ]]; then
-        echo "$ip"
-        return
-    fi
-
-    ip=$(ip -6 addr show scope global 2>/dev/null | grep inet6 | awk '{print $2}' | cut -d/ -f1 | grep -v '^fd' | grep -v '^fe80' | head -n 1)
-    if [[ -n "$ip" && "$ip" == *:* ]]; then
-        echo "$ip"
-    fi
+    ip -6 addr show scope global 2>/dev/null | grep inet6 | awk '{print $2}' | cut -d/ -f1 | grep -v '^fd' | grep -v '^fe80' | head -n 1
 }
 
-show_result() {
-    local IPV4=""
-    local IPV6=""
+IPV4=$(get_ipv4 || true)
+IPV6=$(get_ipv6 || true)
 
-    IPV4=$(get_public_ipv4 || true)
-    IPV6=$(get_public_ipv6 || true)
+echo ""
+echo "========================================"
+echo "S-UI 安装完成"
+echo "========================================"
+echo "版本: ${VERSION}"
+echo "安装目录: ${INSTALL_DIR}"
+echo "运行目录: ${SUI_DIR}"
+echo "运行文件: ${SUI_BIN}"
+echo ""
 
-    echo ""
-    echo "========================================"
-    echo "S-UI 安装完成"
-    echo "========================================"
+if [ -n "$IPV4" ]; then
+    echo "IPv4 面板地址: http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
+else
+    echo "IPv4 面板地址: 未检测到"
+fi
 
-    if [[ -n "$IPV4" ]]; then
-        echo "IPv4 面板地址: http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
-    else
-        echo "IPv4 面板地址: 未检测到"
-    fi
+if [ -n "$IPV6" ]; then
+    echo "IPv6 面板地址: http://[${IPV6}]:${PANEL_PORT}${PANEL_PATH}"
+else
+    echo "IPv6 面板地址: 未检测到"
+fi
 
-    if [[ -n "$IPV6" ]]; then
-        echo "IPv6 面板地址: http://[${IPV6}]:${PANEL_PORT}${PANEL_PATH}"
-    else
-        echo "IPv6 面板地址: 未检测到"
-    fi
+echo ""
+echo "面板端口: ${PANEL_PORT}"
+echo "订阅端口: ${SUB_PORT}"
+echo ""
+echo "常用命令："
+echo "启动: systemctl start s-ui"
+echo "停止: systemctl stop s-ui"
+echo "重启: systemctl restart s-ui"
+echo "状态: systemctl status s-ui"
+echo "日志: journalctl -u s-ui -f"
+echo ""
+echo "如果无法访问，请检查 AWS 安全组是否放行："
+echo "TCP ${PANEL_PORT}"
+echo "TCP ${SUB_PORT}"
+echo "========================================"
+echo ""
 
-    echo ""
-    echo "端口: ${PANEL_PORT}"
-    echo "账号: ${PANEL_USER}"
-    echo "密码: ${PANEL_PASS}"
-    echo ""
-    echo "安装目录: ${INSTALL_DIR}"
-    echo "程序路径: ${BIN_PATH}"
-    echo ""
-    echo "常用命令:"
-    echo "启动: systemctl start ${SERVICE_NAME}"
-    echo "停止: systemctl stop ${SERVICE_NAME}"
-    echo "重启: systemctl restart ${SERVICE_NAME}"
-    echo "状态: systemctl status ${SERVICE_NAME}"
-    echo "日志: journalctl -u ${SERVICE_NAME} -f"
-    echo ""
-    echo "如果无法访问，请检查："
-    echo "1. AWS 安全组是否放行 TCP ${PANEL_PORT}"
-    echo "2. Ubuntu 防火墙是否放行 TCP ${PANEL_PORT}"
-    echo "3. 服务是否正常运行：systemctl status ${SERVICE_NAME}"
-    echo "========================================"
-    echo ""
-}
-
-main() {
-    check_root
-    install_base
-    stop_old_service
-    backup_old_install
-    download_and_install
-    create_systemd_service
-    open_firewall_port
-    start_service
-    show_result
-}
-
-main
+systemctl status ${SERVICE_NAME} --no-pager
