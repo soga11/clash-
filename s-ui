@@ -2,12 +2,18 @@
 
 set -e
 
+VERSION="S-UI_v1.4.1"
+
+REPO_RELEASE_BASE="https://github.com/soga11/clash-/releases/download/${VERSION}"
+
 PANEL_PORT="2095"
 PANEL_PATH="/app/login"
 PANEL_USER="admin"
 PANEL_PASS="admin"
 
 SERVICE_NAME="s-ui"
+INSTALL_DIR="/usr/local/s-ui"
+BIN_PATH="${INSTALL_DIR}/s-ui"
 
 GREEN="\033[0;32m"
 YELLOW="\033[0;33m"
@@ -38,7 +44,7 @@ install_base() {
 
     if command -v apt >/dev/null 2>&1; then
         apt update -y
-        apt install -y curl wget tar unzip ca-certificates
+        apt install -y curl wget tar unzip ca-certificates systemd
     elif command -v yum >/dev/null 2>&1; then
         yum install -y curl wget tar unzip ca-certificates
     elif command -v dnf >/dev/null 2>&1; then
@@ -48,10 +54,120 @@ install_base() {
     fi
 }
 
-run_official_install() {
-    info "正在执行 S-UI 官方安装脚本..."
+detect_arch() {
+    local arch
+    arch=$(uname -m)
 
-    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
+    case "$arch" in
+        x86_64|amd64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        *)
+            error "不支持的系统架构: $arch"
+            exit 1
+            ;;
+    esac
+}
+
+stop_old_service() {
+    info "停止旧服务，如果存在..."
+
+    systemctl stop ${SERVICE_NAME} >/dev/null 2>&1 || true
+}
+
+backup_old_install() {
+    if [[ -d "$INSTALL_DIR" ]]; then
+        local backup_dir
+        backup_dir="/usr/local/s-ui-backup-$(date +%Y%m%d%H%M%S)"
+        info "检测到旧安装目录，备份到: ${backup_dir}"
+        cp -a "$INSTALL_DIR" "$backup_dir" || true
+    fi
+}
+
+download_and_install() {
+    local arch
+    local url
+    local tmp_dir
+    local package_file
+    local found_bin
+
+    arch=$(detect_arch)
+
+    if [[ "$arch" == "amd64" ]]; then
+        url="${REPO_RELEASE_BASE}/s-ui-linux-amd64.tar.gz"
+    elif [[ "$arch" == "arm64" ]]; then
+        url="${REPO_RELEASE_BASE}/s-ui-linux-arm64.tar.gz"
+    fi
+
+    info "当前系统架构: ${arch}"
+    info "下载地址: ${url}"
+
+    tmp_dir=$(mktemp -d)
+    package_file="${tmp_dir}/s-ui.tar.gz"
+
+    curl -L --fail --connect-timeout 15 --max-time 300 -o "$package_file" "$url"
+
+    info "正在解压安装包..."
+
+    mkdir -p "$tmp_dir/extract"
+    tar -zxf "$package_file" -C "$tmp_dir/extract"
+
+    mkdir -p "$INSTALL_DIR"
+
+    found_bin=$(find "$tmp_dir/extract" -type f \( -name "s-ui" -o -name "s-ui-linux-amd64" -o -name "s-ui-linux-arm64" \) | head -n 1)
+
+    if [[ -z "$found_bin" ]]; then
+        warn "没有找到明确的 s-ui 二进制文件，尝试查找可执行文件..."
+        found_bin=$(find "$tmp_dir/extract" -type f -perm /111 | head -n 1)
+    fi
+
+    if [[ -z "$found_bin" ]]; then
+        error "安装失败：压缩包里没有找到可执行文件"
+        echo "解压内容如下："
+        find "$tmp_dir/extract" -maxdepth 3 -type f
+        exit 1
+    fi
+
+    info "找到程序文件: ${found_bin}"
+
+    cp -f "$found_bin" "$BIN_PATH"
+    chmod +x "$BIN_PATH"
+
+    # 如果压缩包里还有其他文件，一并复制过去，避免缺少静态资源
+    cp -a "$tmp_dir/extract"/. "$INSTALL_DIR"/ || true
+    chmod +x "$BIN_PATH"
+
+    rm -rf "$tmp_dir"
+
+    info "S-UI 已安装到: ${BIN_PATH}"
+}
+
+create_systemd_service() {
+    info "正在创建 systemd 服务..."
+
+    cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=S-UI Service
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${BIN_PATH}
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable ${SERVICE_NAME} >/dev/null 2>&1
 }
 
 open_firewall_port() {
@@ -72,6 +188,22 @@ open_firewall_port() {
     fi
 }
 
+start_service() {
+    info "正在启动 S-UI 服务..."
+
+    systemctl restart ${SERVICE_NAME}
+
+    sleep 2
+
+    if systemctl is-active --quiet ${SERVICE_NAME}; then
+        info "S-UI 服务启动成功"
+    else
+        error "S-UI 服务启动失败，最近日志如下："
+        journalctl -u ${SERVICE_NAME} -n 50 --no-pager
+        exit 1
+    fi
+}
+
 get_public_ipv4() {
     local ip=""
 
@@ -88,12 +220,6 @@ get_public_ipv4() {
     fi
 
     ip=$(curl -4s --max-time 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$ip"
-        return
-    fi
-
-    ip=$(curl -4s --max-time 5 https://ifconfig.me 2>/dev/null | tr -d '\n\r')
     if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "$ip"
         return
@@ -132,17 +258,6 @@ get_public_ipv6() {
     fi
 }
 
-restart_service() {
-    info "尝试重启 S-UI 服务..."
-
-    systemctl daemon-reload >/dev/null 2>&1 || true
-
-    if systemctl list-unit-files | grep -q "^${SERVICE_NAME}.service"; then
-        systemctl enable ${SERVICE_NAME} >/dev/null 2>&1 || true
-        systemctl restart ${SERVICE_NAME} >/dev/null 2>&1 || true
-    fi
-}
-
 show_result() {
     local IPV4=""
     local IPV6=""
@@ -172,6 +287,9 @@ show_result() {
     echo "账号: ${PANEL_USER}"
     echo "密码: ${PANEL_PASS}"
     echo ""
+    echo "安装目录: ${INSTALL_DIR}"
+    echo "程序路径: ${BIN_PATH}"
+    echo ""
     echo "常用命令:"
     echo "启动: systemctl start ${SERVICE_NAME}"
     echo "停止: systemctl stop ${SERVICE_NAME}"
@@ -180,9 +298,9 @@ show_result() {
     echo "日志: journalctl -u ${SERVICE_NAME} -f"
     echo ""
     echo "如果无法访问，请检查："
-    echo "1. 云服务器安全组是否放行 TCP ${PANEL_PORT}"
-    echo "2. 系统防火墙是否放行 TCP ${PANEL_PORT}"
-    echo "3. IPv6 访问需要安全组放行 IPv6 入站规则"
+    echo "1. AWS 安全组是否放行 TCP ${PANEL_PORT}"
+    echo "2. Ubuntu 防火墙是否放行 TCP ${PANEL_PORT}"
+    echo "3. 服务是否正常运行：systemctl status ${SERVICE_NAME}"
     echo "========================================"
     echo ""
 }
@@ -190,9 +308,12 @@ show_result() {
 main() {
     check_root
     install_base
-    run_official_install
+    stop_old_service
+    backup_old_install
+    download_and_install
+    create_systemd_service
     open_firewall_port
-    restart_service
+    start_service
     show_result
 }
 
