@@ -2,190 +2,80 @@
 
 set -e
 
-VERSION="S-UI_v1.4.1"
-
 PANEL_PORT="2095"
+PANEL_PATH="/app/login"
 PANEL_USER="admin"
 PANEL_PASS="admin"
-PANEL_PATH="/app/login"
 
-INSTALL_ROOT="/usr/local/s-ui"
-APP_DIR="/usr/local/s-ui/s-ui"
-APP_BIN="/usr/local/s-ui/s-ui/sui"
 SERVICE_NAME="s-ui"
 
-# 如果你的项目仓库不是这个，请改这里
-GITHUB_REPO="alireza0/s-ui"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+RED="\033[0;31m"
+PLAIN="\033[0m"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-PLAIN='\033[0m'
-
-log_info() {
+info() {
     echo -e "${GREEN}[信息]${PLAIN} $1"
 }
 
-log_warn() {
+warn() {
     echo -e "${YELLOW}[警告]${PLAIN} $1"
 }
 
-log_error() {
+error() {
     echo -e "${RED}[错误]${PLAIN} $1"
 }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        log_error "请使用 root 用户运行此脚本"
+        error "请使用 root 用户运行"
         exit 1
     fi
 }
 
-install_dependencies() {
-    log_info "正在安装依赖..."
+install_base() {
+    info "正在安装基础依赖..."
 
     if command -v apt >/dev/null 2>&1; then
         apt update -y
-        apt install -y curl wget tar unzip ca-certificates systemd
+        apt install -y curl wget tar unzip ca-certificates
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y curl wget tar unzip ca-certificates systemd
+        yum install -y curl wget tar unzip ca-certificates
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y curl wget tar unzip ca-certificates systemd
+        dnf install -y curl wget tar unzip ca-certificates
     else
-        log_error "不支持的系统，请手动安装 curl wget tar unzip"
-        exit 1
+        warn "未识别到 apt/yum/dnf，请确认系统已安装 curl wget tar unzip"
     fi
 }
 
-detect_arch() {
-    ARCH=$(uname -m)
+run_official_install() {
+    info "正在执行 S-UI 官方安装脚本..."
 
-    case "$ARCH" in
-        x86_64 | amd64)
-            ARCH="amd64"
-            ;;
-        aarch64 | arm64)
-            ARCH="arm64"
-            ;;
-        armv7l)
-            ARCH="armv7"
-            ;;
-        armv6l)
-            ARCH="armv6"
-            ;;
-        *)
-            log_error "不支持的架构: $(uname -m)"
-            exit 1
-            ;;
-    esac
-
-    log_info "检测到系统架构: ${ARCH}"
+    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)
 }
 
-get_download_url() {
-    log_info "正在获取下载地址..."
+open_firewall_port() {
+    info "尝试放行面板端口 ${PANEL_PORT}..."
 
-    API_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${VERSION}"
-
-    DOWNLOAD_URL=$(curl -sL "$API_URL" | grep "browser_download_url" | grep -i "linux" | grep -i "$ARCH" | head -n 1 | cut -d '"' -f 4)
-
-    if [[ -z "$DOWNLOAD_URL" ]]; then
-        log_warn "未从 GitHub API 自动匹配到下载地址，尝试备用规则..."
-
-        DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/s-ui-linux-${ARCH}.tar.gz"
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow ${PANEL_PORT}/tcp >/dev/null 2>&1 || true
     fi
 
-    log_info "下载地址: ${DOWNLOAD_URL}"
-}
-
-stop_old_service() {
-    log_info "停止旧服务..."
-
-    systemctl stop ${SERVICE_NAME} >/dev/null 2>&1 || true
-    systemctl disable ${SERVICE_NAME} >/dev/null 2>&1 || true
-}
-
-download_and_install() {
-    log_info "正在下载并安装 S-UI..."
-
-    mkdir -p "$INSTALL_ROOT"
-    cd /tmp
-
-    rm -rf /tmp/s-ui-install
-    mkdir -p /tmp/s-ui-install
-    cd /tmp/s-ui-install
-
-    wget -O s-ui.tar.gz "$DOWNLOAD_URL" || {
-        log_error "下载失败，请检查版本号、仓库地址或网络"
-        exit 1
-    }
-
-    tar -zxvf s-ui.tar.gz
-
-    rm -rf "$APP_DIR"
-    mkdir -p "$APP_DIR"
-
-    if [[ -f "./sui" ]]; then
-        cp -f ./sui "$APP_BIN"
-    elif [[ -f "./s-ui/sui" ]]; then
-        cp -f ./s-ui/sui "$APP_BIN"
-    else
-        FOUND_BIN=$(find . -type f -name "sui" | head -n 1)
-        if [[ -n "$FOUND_BIN" ]]; then
-            cp -f "$FOUND_BIN" "$APP_BIN"
-        else
-            log_error "未找到 sui 可执行文件"
-            exit 1
-        fi
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        firewall-cmd --permanent --add-port=${PANEL_PORT}/tcp >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
     fi
 
-    chmod +x "$APP_BIN"
-
-    log_info "安装完成: ${APP_BIN}"
-}
-
-create_service() {
-    log_info "正在创建 systemd 服务..."
-
-    cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
-[Unit]
-Description=S-UI Service
-After=network.target nss-lookup.target
-
-[Service]
-Type=simple
-WorkingDirectory=${APP_DIR}
-ExecStart=${APP_BIN}
-Restart=always
-RestartSec=5
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-}
-
-start_service() {
-    log_info "正在启动 S-UI..."
-
-    systemctl enable ${SERVICE_NAME}
-    systemctl restart ${SERVICE_NAME}
-
-    sleep 2
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -C INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || \
+        iptables -I INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || true
+    fi
 }
 
 get_public_ipv4() {
     local ip=""
 
-    ip=$(curl -4s --max-time 5 https://api.ipify.org 2>/dev/null)
-    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$ip"
-        return
-    fi
-
-    ip=$(curl -4s --max-time 5 https://ifconfig.me 2>/dev/null)
+    ip=$(curl -4s --max-time 5 https://api.ipify.org 2>/dev/null | tr -d '\n\r')
     if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "$ip"
         return
@@ -203,8 +93,13 @@ get_public_ipv4() {
         return
     fi
 
-    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    ip=$(curl -4s --max-time 5 https://ifconfig.me 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+        return
+    fi
 
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "$ip"
     fi
@@ -219,109 +114,85 @@ get_public_ipv6() {
         return
     fi
 
-    ip=$(curl -6s --max-time 5 https://ifconfig.co 2>/dev/null | tr -d '\n\r')
-    if [[ -n "$ip" && "$ip" == *:* ]]; then
-        echo "$ip"
-        return
-    fi
-
     ip=$(curl -6s --max-time 5 https://ipv6.icanhazip.com 2>/dev/null | tr -d '\n\r')
     if [[ -n "$ip" && "$ip" == *:* ]]; then
         echo "$ip"
         return
     fi
 
-    ip=$(ip -6 addr show scope global 2>/dev/null | grep inet6 | awk '{print $2}' | cut -d/ -f1 | grep -v '^fd' | grep -v '^fe80' | head -n 1)
+    ip=$(curl -6s --max-time 5 https://ifconfig.co 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" == *:* ]]; then
+        echo "$ip"
+        return
+    fi
 
+    ip=$(ip -6 addr show scope global 2>/dev/null | grep inet6 | awk '{print $2}' | cut -d/ -f1 | grep -v '^fd' | grep -v '^fe80' | head -n 1)
     if [[ -n "$ip" && "$ip" == *:* ]]; then
         echo "$ip"
     fi
 }
 
-open_firewall_port() {
-    log_info "尝试放行端口 ${PANEL_PORT}..."
+restart_service() {
+    info "尝试重启 S-UI 服务..."
 
-    if command -v ufw >/dev/null 2>&1; then
-        ufw allow ${PANEL_PORT}/tcp >/dev/null 2>&1 || true
-    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
 
-    if command -v firewall-cmd >/dev/null 2>&1; then
-        firewall-cmd --permanent --add-port=${PANEL_PORT}/tcp >/dev/null 2>&1 || true
-        firewall-cmd --reload >/dev/null 2>&1 || true
-    fi
-
-    if command -v iptables >/dev/null 2>&1; then
-        iptables -C INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT || true
+    if systemctl list-unit-files | grep -q "^${SERVICE_NAME}.service"; then
+        systemctl enable ${SERVICE_NAME} >/dev/null 2>&1 || true
+        systemctl restart ${SERVICE_NAME} >/dev/null 2>&1 || true
     fi
 }
 
 show_result() {
-    IPV4=$(get_public_ipv4)
-    IPV6=$(get_public_ipv6)
+    local IPV4=""
+    local IPV6=""
 
-    IPV4_URL=""
-    IPV6_URL=""
+    IPV4=$(get_public_ipv4 || true)
+    IPV6=$(get_public_ipv6 || true)
+
+    echo ""
+    echo "========================================"
+    echo "S-UI 安装完成"
+    echo "========================================"
 
     if [[ -n "$IPV4" ]]; then
-        IPV4_URL="http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
-    fi
-
-    if [[ -n "$IPV6" ]]; then
-        IPV6_URL="http://[${IPV6}]:${PANEL_PORT}${PANEL_PATH}"
-    fi
-
-    echo ""
-    echo "========================================"
-    echo "S-UI 安装成功"
-    echo "========================================"
-    echo "版本: ${VERSION}"
-    echo "安装目录: ${INSTALL_ROOT}"
-    echo "运行目录: ${APP_DIR}"
-    echo "运行文件: ${APP_BIN}"
-    echo ""
-    echo "登录信息："
-
-    if [[ -n "$IPV4_URL" ]]; then
-        echo "IPv4 面板地址: ${IPV4_URL}"
+        echo "IPv4 面板地址: http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
     else
         echo "IPv4 面板地址: 未检测到"
     fi
 
-    if [[ -n "$IPV6_URL" ]]; then
-        echo "IPv6 面板地址: ${IPV6_URL}"
+    if [[ -n "$IPV6" ]]; then
+        echo "IPv6 面板地址: http://[${IPV6}]:${PANEL_PORT}${PANEL_PATH}"
     else
         echo "IPv6 面板地址: 未检测到"
     fi
 
+    echo ""
     echo "端口: ${PANEL_PORT}"
     echo "账号: ${PANEL_USER}"
     echo "密码: ${PANEL_PASS}"
     echo ""
-    echo "常用命令："
+    echo "常用命令:"
     echo "启动: systemctl start ${SERVICE_NAME}"
     echo "停止: systemctl stop ${SERVICE_NAME}"
     echo "重启: systemctl restart ${SERVICE_NAME}"
     echo "状态: systemctl status ${SERVICE_NAME}"
     echo "日志: journalctl -u ${SERVICE_NAME} -f"
     echo ""
-    echo "如果无法访问，请检查云厂商安全组是否放行 TCP ${PANEL_PORT}"
-    echo "IPv6 访问还需要安全组放行 IPv6 入站规则"
+    echo "如果无法访问，请检查："
+    echo "1. 云服务器安全组是否放行 TCP ${PANEL_PORT}"
+    echo "2. 系统防火墙是否放行 TCP ${PANEL_PORT}"
+    echo "3. IPv6 访问需要安全组放行 IPv6 入站规则"
     echo "========================================"
     echo ""
-
-    systemctl status ${SERVICE_NAME} --no-pager || true
 }
 
 main() {
     check_root
-    install_dependencies
-    detect_arch
-    get_download_url
-    stop_old_service
-    download_and_install
-    create_service
+    install_base
+    run_official_install
     open_firewall_port
-    start_service
+    restart_service
     show_result
 }
 
