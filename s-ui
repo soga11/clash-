@@ -1,0 +1,158 @@
+#!/bin/bash
+set -e
+
+VERSION="S-UI_v1.4.1"
+BASE_URL="https://github.com/soga11/clash-/releases/download/${VERSION}"
+INSTALL_DIR="/usr/local/s-ui"
+SERVICE_NAME="s-ui"
+
+echo "========================================"
+echo "开始安装 S-UI"
+echo "版本: ${VERSION}"
+echo "========================================"
+
+if [ "$(id -u)" != "0" ]; then
+    echo "请使用 root 用户运行此脚本"
+    echo "例如：sudo bash install.sh"
+    exit 1
+fi
+
+ARCH=$(uname -m)
+
+case "$ARCH" in
+    x86_64|amd64)
+        FILE="s-ui-linux-amd64.tar.gz"
+        ;;
+    aarch64|arm64)
+        FILE="s-ui-linux-arm64.tar.gz"
+        ;;
+    *)
+        echo "不支持的系统架构: $ARCH"
+        exit 1
+        ;;
+esac
+
+URL="${BASE_URL}/${FILE}"
+
+echo "检测到系统架构: $ARCH"
+echo "准备下载文件: $FILE"
+echo "下载地址: $URL"
+
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo "当前系统不支持 systemctl，暂不支持安装"
+    exit 1
+fi
+
+if command -v wget >/dev/null 2>&1; then
+    DOWNLOAD_CMD="wget -O"
+elif command -v curl >/dev/null 2>&1; then
+    DOWNLOAD_CMD="curl -L -o"
+else
+    echo "未检测到 wget 或 curl，正在尝试安装 wget..."
+
+    if command -v apt >/dev/null 2>&1; then
+        apt update
+        apt install -y wget
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y wget
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y wget
+    else
+        echo "无法自动安装 wget，请手动安装 wget 或 curl 后重试"
+        exit 1
+    fi
+
+    DOWNLOAD_CMD="wget -O"
+fi
+
+echo "停止旧服务..."
+systemctl stop ${SERVICE_NAME} 2>/dev/null || true
+
+if [ -d "$INSTALL_DIR" ]; then
+    BACKUP_DIR="${INSTALL_DIR}.bak.$(date +%F-%H%M%S)"
+    echo "备份旧版本到: $BACKUP_DIR"
+    cp -a "$INSTALL_DIR" "$BACKUP_DIR"
+fi
+
+echo "清理旧目录..."
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+
+cd /tmp
+rm -f "$FILE"
+
+echo "开始下载..."
+if command -v wget >/dev/null 2>&1; then
+    wget -O "$FILE" "$URL"
+else
+    curl -L -o "$FILE" "$URL"
+fi
+
+if [ ! -s "$FILE" ]; then
+    echo "下载失败，文件为空"
+    exit 1
+fi
+
+echo "开始解压..."
+tar -xzf "$FILE" -C "$INSTALL_DIR"
+
+SUI_BIN=$(find "$INSTALL_DIR" -type f -name "sui" | head -n 1)
+
+if [ -z "$SUI_BIN" ]; then
+    echo "未找到 sui 可执行文件，请检查压缩包结构"
+    echo "当前解压文件列表："
+    find "$INSTALL_DIR" -maxdepth 4 -type f
+    exit 1
+fi
+
+SUI_DIR=$(dirname "$SUI_BIN")
+
+chmod +x "$SUI_BIN"
+
+if [ -f "$SUI_DIR/s-ui.sh" ]; then
+    chmod +x "$SUI_DIR/s-ui.sh"
+    ln -sf "$SUI_DIR/s-ui.sh" /usr/bin/s-ui
+fi
+
+echo "写入 systemd 服务..."
+
+cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+[Unit]
+Description=S-UI Service
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${SUI_DIR}
+ExecStart=${SUI_BIN}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable ${SERVICE_NAME}
+systemctl restart ${SERVICE_NAME}
+
+echo ""
+echo "========================================"
+echo "S-UI 安装完成"
+echo "========================================"
+echo "版本: ${VERSION}"
+echo "安装目录: ${INSTALL_DIR}"
+echo "运行目录: ${SUI_DIR}"
+echo "运行文件: ${SUI_BIN}"
+echo ""
+echo "常用命令："
+echo "启动: systemctl start s-ui"
+echo "停止: systemctl stop s-ui"
+echo "重启: systemctl restart s-ui"
+echo "状态: systemctl status s-ui"
+echo "日志: journalctl -u s-ui -f"
+echo ""
+
+systemctl status ${SERVICE_NAME} --no-pager
