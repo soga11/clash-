@@ -1,132 +1,162 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 set -e
 
 VERSION="S-UI_v1.4.1"
-BASE_URL="https://github.com/soga11/clash-/releases/download/${VERSION}"
-INSTALL_DIR="/usr/local/s-ui"
+
+PANEL_PORT="2095"
+PANEL_USER="admin"
+PANEL_PASS="admin"
+PANEL_PATH="/app/login"
+
+INSTALL_ROOT="/usr/local/s-ui"
+APP_DIR="/usr/local/s-ui/s-ui"
+APP_BIN="/usr/local/s-ui/s-ui/sui"
 SERVICE_NAME="s-ui"
 
-echo "========================================"
-echo "开始安装 S-UI"
-echo "版本: ${VERSION}"
-echo "========================================"
+# 如果你的项目仓库不是这个，请改这里
+GITHUB_REPO="alireza0/s-ui"
 
-if [ "$(id -u)" != "0" ]; then
-    echo "请使用 root 用户运行此脚本"
-    echo "例如：sudo bash install.sh"
-    exit 1
-fi
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+PLAIN='\033[0m'
 
-ARCH=$(uname -m)
+log_info() {
+    echo -e "${GREEN}[信息]${PLAIN} $1"
+}
 
-case "$ARCH" in
-    x86_64|amd64)
-        FILE="s-ui-linux-amd64.tar.gz"
-        ;;
-    aarch64|arm64)
-        FILE="s-ui-linux-arm64.tar.gz"
-        ;;
-    *)
-        echo "不支持的系统架构: $ARCH"
-        exit 1
-        ;;
-esac
+log_warn() {
+    echo -e "${YELLOW}[警告]${PLAIN} $1"
+}
 
-URL="${BASE_URL}/${FILE}"
+log_error() {
+    echo -e "${RED}[错误]${PLAIN} $1"
+}
 
-echo "检测到系统架构: $ARCH"
-echo "准备下载文件: $FILE"
-echo "下载地址: $URL"
-
-if ! command -v systemctl >/dev/null 2>&1; then
-    echo "当前系统不支持 systemctl，暂不支持安装"
-    exit 1
-fi
-
-if command -v wget >/dev/null 2>&1; then
-    DOWNLOAD_CMD="wget -O"
-elif command -v curl >/dev/null 2>&1; then
-    DOWNLOAD_CMD="curl -L -o"
-else
-    echo "未检测到 wget 或 curl，正在尝试安装 wget..."
-
-    if command -v apt >/dev/null 2>&1; then
-        apt update
-        apt install -y wget
-    elif command -v yum >/dev/null 2>&1; then
-        yum install -y wget
-    elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y wget
-    else
-        echo "无法自动安装 wget，请手动安装 wget 或 curl 后重试"
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_error "请使用 root 用户运行此脚本"
         exit 1
     fi
+}
 
-    DOWNLOAD_CMD="wget -O"
-fi
+install_dependencies() {
+    log_info "正在安装依赖..."
 
-echo "停止旧服务..."
-systemctl stop ${SERVICE_NAME} 2>/dev/null || true
+    if command -v apt >/dev/null 2>&1; then
+        apt update -y
+        apt install -y curl wget tar unzip ca-certificates systemd
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y curl wget tar unzip ca-certificates systemd
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y curl wget tar unzip ca-certificates systemd
+    else
+        log_error "不支持的系统，请手动安装 curl wget tar unzip"
+        exit 1
+    fi
+}
 
-if [ -d "$INSTALL_DIR" ]; then
-    BACKUP_DIR="${INSTALL_DIR}.bak.$(date +%F-%H%M%S)"
-    echo "备份旧版本到: $BACKUP_DIR"
-    cp -a "$INSTALL_DIR" "$BACKUP_DIR"
-fi
+detect_arch() {
+    ARCH=$(uname -m)
 
-echo "清理旧目录..."
-rm -rf "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR"
+    case "$ARCH" in
+        x86_64 | amd64)
+            ARCH="amd64"
+            ;;
+        aarch64 | arm64)
+            ARCH="arm64"
+            ;;
+        armv7l)
+            ARCH="armv7"
+            ;;
+        armv6l)
+            ARCH="armv6"
+            ;;
+        *)
+            log_error "不支持的架构: $(uname -m)"
+            exit 1
+            ;;
+    esac
 
-cd /tmp
-rm -f "$FILE"
+    log_info "检测到系统架构: ${ARCH}"
+}
 
-echo "开始下载..."
-if command -v wget >/dev/null 2>&1; then
-    wget -O "$FILE" "$URL"
-else
-    curl -L -o "$FILE" "$URL"
-fi
+get_download_url() {
+    log_info "正在获取下载地址..."
 
-if [ ! -s "$FILE" ]; then
-    echo "下载失败，文件为空"
-    exit 1
-fi
+    API_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${VERSION}"
 
-echo "开始解压..."
-tar -xzf "$FILE" -C "$INSTALL_DIR"
+    DOWNLOAD_URL=$(curl -sL "$API_URL" | grep "browser_download_url" | grep -i "linux" | grep -i "$ARCH" | head -n 1 | cut -d '"' -f 4)
 
-SUI_BIN=$(find "$INSTALL_DIR" -type f -name "sui" | head -n 1)
+    if [[ -z "$DOWNLOAD_URL" ]]; then
+        log_warn "未从 GitHub API 自动匹配到下载地址，尝试备用规则..."
 
-if [ -z "$SUI_BIN" ]; then
-    echo "未找到 sui 可执行文件，请检查压缩包结构"
-    echo "当前解压文件列表："
-    find "$INSTALL_DIR" -maxdepth 4 -type f
-    exit 1
-fi
+        DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/s-ui-linux-${ARCH}.tar.gz"
+    fi
 
-SUI_DIR=$(dirname "$SUI_BIN")
+    log_info "下载地址: ${DOWNLOAD_URL}"
+}
 
-chmod +x "$SUI_BIN"
+stop_old_service() {
+    log_info "停止旧服务..."
 
-if [ -f "$SUI_DIR/s-ui.sh" ]; then
-    chmod +x "$SUI_DIR/s-ui.sh"
-    ln -sf "$SUI_DIR/s-ui.sh" /usr/bin/s-ui
-fi
+    systemctl stop ${SERVICE_NAME} >/dev/null 2>&1 || true
+    systemctl disable ${SERVICE_NAME} >/dev/null 2>&1 || true
+}
 
-echo "写入 systemd 服务..."
+download_and_install() {
+    log_info "正在下载并安装 S-UI..."
 
-cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
+    mkdir -p "$INSTALL_ROOT"
+    cd /tmp
+
+    rm -rf /tmp/s-ui-install
+    mkdir -p /tmp/s-ui-install
+    cd /tmp/s-ui-install
+
+    wget -O s-ui.tar.gz "$DOWNLOAD_URL" || {
+        log_error "下载失败，请检查版本号、仓库地址或网络"
+        exit 1
+    }
+
+    tar -zxvf s-ui.tar.gz
+
+    rm -rf "$APP_DIR"
+    mkdir -p "$APP_DIR"
+
+    if [[ -f "./sui" ]]; then
+        cp -f ./sui "$APP_BIN"
+    elif [[ -f "./s-ui/sui" ]]; then
+        cp -f ./s-ui/sui "$APP_BIN"
+    else
+        FOUND_BIN=$(find . -type f -name "sui" | head -n 1)
+        if [[ -n "$FOUND_BIN" ]]; then
+            cp -f "$FOUND_BIN" "$APP_BIN"
+        else
+            log_error "未找到 sui 可执行文件"
+            exit 1
+        fi
+    fi
+
+    chmod +x "$APP_BIN"
+
+    log_info "安装完成: ${APP_BIN}"
+}
+
+create_service() {
+    log_info "正在创建 systemd 服务..."
+
+    cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
 Description=S-UI Service
 After=network.target nss-lookup.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=${SUI_DIR}
-ExecStart=${SUI_BIN}
-Restart=on-failure
+WorkingDirectory=${APP_DIR}
+ExecStart=${APP_BIN}
+Restart=always
 RestartSec=5
 LimitNOFILE=1048576
 
@@ -134,25 +164,165 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable ${SERVICE_NAME}
-systemctl restart ${SERVICE_NAME}
+    systemctl daemon-reload
+}
 
-echo ""
-echo "========================================"
-echo "S-UI 安装完成"
-echo "========================================"
-echo "版本: ${VERSION}"
-echo "安装目录: ${INSTALL_DIR}"
-echo "运行目录: ${SUI_DIR}"
-echo "运行文件: ${SUI_BIN}"
-echo ""
-echo "常用命令："
-echo "启动: systemctl start s-ui"
-echo "停止: systemctl stop s-ui"
-echo "重启: systemctl restart s-ui"
-echo "状态: systemctl status s-ui"
-echo "日志: journalctl -u s-ui -f"
-echo ""
+start_service() {
+    log_info "正在启动 S-UI..."
 
-systemctl status ${SERVICE_NAME} --no-pager
+    systemctl enable ${SERVICE_NAME}
+    systemctl restart ${SERVICE_NAME}
+
+    sleep 2
+}
+
+get_public_ipv4() {
+    local ip=""
+
+    ip=$(curl -4s --max-time 5 https://api.ipify.org 2>/dev/null)
+    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(curl -4s --max-time 5 https://ifconfig.me 2>/dev/null)
+    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(curl -4s --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(curl -4s --max-time 5 https://checkip.amazonaws.com 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+    if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+    fi
+}
+
+get_public_ipv6() {
+    local ip=""
+
+    ip=$(curl -6s --max-time 5 https://api64.ipify.org 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" == *:* ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(curl -6s --max-time 5 https://ifconfig.co 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" == *:* ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(curl -6s --max-time 5 https://ipv6.icanhazip.com 2>/dev/null | tr -d '\n\r')
+    if [[ -n "$ip" && "$ip" == *:* ]]; then
+        echo "$ip"
+        return
+    fi
+
+    ip=$(ip -6 addr show scope global 2>/dev/null | grep inet6 | awk '{print $2}' | cut -d/ -f1 | grep -v '^fd' | grep -v '^fe80' | head -n 1)
+
+    if [[ -n "$ip" && "$ip" == *:* ]]; then
+        echo "$ip"
+    fi
+}
+
+open_firewall_port() {
+    log_info "尝试放行端口 ${PANEL_PORT}..."
+
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow ${PANEL_PORT}/tcp >/dev/null 2>&1 || true
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        firewall-cmd --permanent --add-port=${PANEL_PORT}/tcp >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -C INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT -p tcp --dport ${PANEL_PORT} -j ACCEPT || true
+    fi
+}
+
+show_result() {
+    IPV4=$(get_public_ipv4)
+    IPV6=$(get_public_ipv6)
+
+    IPV4_URL=""
+    IPV6_URL=""
+
+    if [[ -n "$IPV4" ]]; then
+        IPV4_URL="http://${IPV4}:${PANEL_PORT}${PANEL_PATH}"
+    fi
+
+    if [[ -n "$IPV6" ]]; then
+        IPV6_URL="http://[${IPV6}]:${PANEL_PORT}${PANEL_PATH}"
+    fi
+
+    echo ""
+    echo "========================================"
+    echo "S-UI 安装成功"
+    echo "========================================"
+    echo "版本: ${VERSION}"
+    echo "安装目录: ${INSTALL_ROOT}"
+    echo "运行目录: ${APP_DIR}"
+    echo "运行文件: ${APP_BIN}"
+    echo ""
+    echo "登录信息："
+
+    if [[ -n "$IPV4_URL" ]]; then
+        echo "IPv4 面板地址: ${IPV4_URL}"
+    else
+        echo "IPv4 面板地址: 未检测到"
+    fi
+
+    if [[ -n "$IPV6_URL" ]]; then
+        echo "IPv6 面板地址: ${IPV6_URL}"
+    else
+        echo "IPv6 面板地址: 未检测到"
+    fi
+
+    echo "端口: ${PANEL_PORT}"
+    echo "账号: ${PANEL_USER}"
+    echo "密码: ${PANEL_PASS}"
+    echo ""
+    echo "常用命令："
+    echo "启动: systemctl start ${SERVICE_NAME}"
+    echo "停止: systemctl stop ${SERVICE_NAME}"
+    echo "重启: systemctl restart ${SERVICE_NAME}"
+    echo "状态: systemctl status ${SERVICE_NAME}"
+    echo "日志: journalctl -u ${SERVICE_NAME} -f"
+    echo ""
+    echo "如果无法访问，请检查云厂商安全组是否放行 TCP ${PANEL_PORT}"
+    echo "IPv6 访问还需要安全组放行 IPv6 入站规则"
+    echo "========================================"
+    echo ""
+
+    systemctl status ${SERVICE_NAME} --no-pager || true
+}
+
+main() {
+    check_root
+    install_dependencies
+    detect_arch
+    get_download_url
+    stop_old_service
+    download_and_install
+    create_service
+    open_firewall_port
+    start_service
+    show_result
+}
+
+main
