@@ -1,11 +1,7 @@
+# 创建一个临时脚本文件
+cat > /tmp/hy2_install.sh << 'SCRIPT'
 #!/bin/bash
 set -euo pipefail
-
-# ========================================
-# HY2 + SOCKS5 端口跳跃版 (iptables 转发)
-# 主端口: 52015
-# 跳跃端口: 50100-50200 (iptables 转发)
-# ========================================
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -23,9 +19,8 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  HY2 + SOCKS5 端口跳跃版安装${NC}"
 echo -e "${GREEN}========================================${NC}"
 
-# ========== 安装依赖 ==========
+# ========== 安装依赖 (跳过apt update) ==========
 echo -e "\n${CYAN}[1/6] 安装依赖...${NC}"
-apt update -qq
 apt install -y -qq curl iptables iptables-persistent netfilter-persistent > /dev/null 2>&1
 
 # ========== 下载 HY2 ==========
@@ -63,7 +58,6 @@ echo -e "  地区: ${SERVER_REGION}, ${SERVER_COUNTRY}"
 # ========== 生成配置 ==========
 echo -e "\n${CYAN}[4/6] 生成 HY2 配置...${NC}"
 
-# 生成随机密码
 HY2_PASSWORD=$(openssl rand -base64 24 | tr -d '/+' | head -c 16)
 SOCKS_USER="soga"
 SOCKS_PASS="sogasoga"
@@ -97,7 +91,6 @@ quic:
   maxConnRwnd: 5120
 EOF
 
-# 生成自签证书
 openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
   -keyout /opt/hy2/key.pem -out /opt/hy2/cert.pem \
   -subj "/CN=${SNI_DOMAIN}" -days 3650 2>/dev/null
@@ -105,18 +98,13 @@ openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
 # ========== 配置 iptables 端口跳跃 ==========
 echo -e "\n${CYAN}[5/6] 配置 iptables 端口跳跃...${NC}"
 
-# 获取网卡名称
 NETWORK_IF=$(ip route get 8.8.8.8 | grep -oP 'dev \K[^ ]+' | head -1)
 echo -e "  网卡: ${NETWORK_IF}"
 echo -e "  转发规则: ${HOPS_START}-${HOPS_END} → ${HY2_PORT}"
 
-# 清理旧规则
 iptables -t nat -F PREROUTING 2>/dev/null || true
-
-# 添加转发规则 (UDP)
 iptables -t nat -A PREROUTING -i ${NETWORK_IF} -p udp --dport ${HOPS_START}:${HOPS_END} -j REDIRECT --to-ports ${HY2_PORT}
 
-# 保存规则
 netfilter-persistent save 2>/dev/null || iptables-save > /etc/iptables/rules.v4
 
 echo -e "  ${GREEN}✓${NC} iptables 规则已配置"
@@ -146,7 +134,7 @@ systemctl restart hy2-${HY2_PORT}
 # ========== 安装 SOCKS5 (sing-box) ==========
 echo -e "\n${CYAN}安装 SOCKS5...${NC}"
 
-mkdir -p ${SB_DIR:-/opt/sing-box}
+mkdir -p /opt/sing-box
 
 SB_VERSION=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest 2>/dev/null | grep -oP '"tag_name":\s*"\K[^"]+' | head -1 || echo "v1.9.4")
 SB_URL="https://github.com/SagerNet/sing-box/releases/download/${SB_VERSION}/sing-box-${SB_VERSION}-linux-${ARCH_NAME}.tar.gz"
@@ -158,23 +146,9 @@ chmod +x /opt/sing-box/sing-box
 
 cat > /opt/sing-box/config.json << EOF
 {
-  "log": {
-    "level": "info",
-    "output": "/var/log/sing-box.log"
-  },
-  "inbounds": [
-    {
-      "type": "socks",
-      "listen": "::",
-      "listen_port": ${SOCKS_PORT},
-      "users": [
-        {"username": "${SOCKS_USER}", "password": "${SOCKS_PASS}"}
-      ]
-    }
-  ],
-  "outbounds": [
-    {"type": "direct"}
-  ]
+  "log": {"level": "info", "output": "/var/log/sing-box.log"},
+  "inbounds": [{"type": "socks", "listen": "::", "listen_port": ${SOCKS_PORT}, "users": [{"username": "${SOCKS_USER}", "password": "${SOCKS_PASS}"}]}],
+  "outbounds": [{"type": "direct"}]
 }
 EOF
 
@@ -182,12 +156,10 @@ cat > /etc/systemd/system/sing-box.service << EOF
 [Unit]
 Description=sing-box SOCKS5 Service
 After=network.target
-
 [Service]
 ExecStart=/opt/sing-box/sing-box run -c /opt/sing-box/config.json
 Restart=on-failure
 RestartSec=5
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -198,8 +170,6 @@ systemctl restart sing-box
 
 # ========== 输出结果 ==========
 sleep 2
-
-# 生成正确的 hysteria2 链接（端口跳跃格式）
 HY2_LINK="hysteria2://${HY2_PASSWORD}@${SERVER_IP}:${HY2_PORT},${HOPS_START}-${HOPS_END}?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#${HOSTNAME}-HY2-Hop"
 
 echo ""
@@ -233,3 +203,7 @@ echo -e "  SOCKS5 状态: systemctl status sing-box"
 echo -e "  SOCKS5 日志: journalctl -u sing-box -f"
 echo ""
 echo -e "${GREEN}========================================${NC}"
+SCRIPT
+
+# 运行修改后的脚本
+bash /tmp/hy2_install.sh
