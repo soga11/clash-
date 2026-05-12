@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # ========================================
-# HY2 + SOCKS5 Combined Edition
+# HY2 + SOCKS5 Port Hopping Edition
 # HY2: apernet/hysteria 独立运行
 # SOCKS5: sing-box 独立运行
+# 端口跳跃: 50100-50200 (100个UDP端口)
 # Date: 2026-03-18
 # ========================================
 
@@ -24,6 +25,12 @@ SNI_DOMAIN="icloud.cdn-apple.com"
 SOCKS_PORT="40443"
 SOCKS_USER="soga"
 SOCKS_PASS="sogasoga"
+
+# 端口跳跃配置
+HOPS_START="${HOPS_START:-50100}"
+HOPS_END="${HOPS_END:-50200}"
+HY2_HOPS_PORTS=$(seq ${HOPS_START} ${HOPS_END} 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+HOPS_COUNT=$((HOPS_END - HOPS_START + 1))
 
 HY2_DIR="/opt/skim-hy2"
 SB_DIR="/opt/sing-box"
@@ -77,17 +84,17 @@ is_busybox_grep() {
 
 install_packages() {
   if command -v apk >/dev/null 2>&1; then
-    apk update && apk add curl jq tar openssl xz grep wget ca-certificates
+    apk update && apk add curl jq tar openssl xz grep wget ca-certificates iproute2
   elif command -v apt-get >/dev/null 2>&1; then
-    apt-get update && apt-get install -y curl jq tar openssl xz-utils grep wget ca-certificates
+    apt-get update && apt-get install -y curl jq tar openssl xz-utils grep wget ca-certificates iproute2
   elif command -v pacman >/dev/null 2>&1; then
-    pacman -Syu --noconfirm curl jq tar openssl xz grep wget ca-certificates
+    pacman -Syu --noconfirm curl jq tar openssl xz grep wget ca-certificates iproute2
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y curl jq tar openssl xz grep wget ca-certificates
+    dnf install -y curl jq tar openssl xz grep wget ca-certificates iproute2
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y curl jq tar openssl xz grep wget ca-certificates
+    yum install -y curl jq tar openssl xz grep wget ca-certificates iproute2
   elif command -v zypper >/dev/null 2>&1; then
-    zypper install -y curl jq tar openssl xz grep wget ca-certificates
+    zypper install -y curl jq tar openssl xz grep wget ca-certificates iproute2
   else
     echo -e "${RED_BG}[ERROR] Unsupported package manager.${NORMAL}"
     exit 1
@@ -176,7 +183,7 @@ get_public_ips() {
 
 get_latest_hy2_version() {
   local latest_version
-  latest_version="$(curl -s "https://api.github.com/repos/apernet/hysteria/releases/latest" | jq -r .tag_name 2>/dev/null || true)"
+  latest_version="$(curl -s --max-time 10 "https://api.github.com/repos/apernet/hysteria/releases/latest" | jq -r .tag_name 2>/dev/null || true)"
   if [[ "${latest_version}" == "null" || -z "${latest_version}" ]]; then
     echo "app/v2.6.5"
   else
@@ -189,7 +196,7 @@ download_hy2_core() {
   local version="$1"
   local url="https://github.com/apernet/hysteria/releases/download/${version}/hysteria-linux-${HY2_ARCH}"
   echo -e "${GREEN_BG}[HY2] Downloading ${url}${NORMAL}"
-  curl -fsSL -o "${HY2_DIR}/hy2" "${url}"
+  curl -fsSL --retry 3 -o "${HY2_DIR}/hy2" "${url}"
   chmod +x "${HY2_DIR}/hy2"
   echo -e "${GREEN_BG}[HY2] Core installed to ${HY2_DIR}/hy2${NORMAL}"
 }
@@ -214,15 +221,22 @@ install_or_update_hy2() {
 }
 
 get_latest_singbox_version() {
-  curl -s "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | jq -r .tag_name 2>/dev/null || true
+  local latest_version
+  latest_version="$(curl -s --max-time 10 "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | jq -r .tag_name 2>/dev/null || true)"
+  if [[ "${latest_version}" == "null" || -z "${latest_version}" ]]; then
+    echo "v1.9.4"
+  else
+    echo "${latest_version}"
+  fi
 }
 
 install_or_update_singbox() {
-  local version file url tmpdir
+  local version file url tmpdir bin_path
   version="$(get_latest_singbox_version)"
+  
   if [[ -z "${version}" || "${version}" == "null" ]]; then
-    echo -e "${RED_BG}[ERROR] Unable to fetch sing-box latest version.${NORMAL}"
-    exit 1
+    echo -e "${YELLOW_BG}[Sing-box] Unable to fetch latest version, using fallback v1.9.4${NORMAL}"
+    version="v1.9.4"
   fi
 
   tmpdir="$(mktemp -d)"
@@ -230,13 +244,17 @@ install_or_update_singbox() {
   url="https://github.com/SagerNet/sing-box/releases/download/${version}/${file}"
 
   echo -e "${GREEN_BG}[Sing-box] Downloading ${url}${NORMAL}"
-  curl -fsSL -o "${tmpdir}/${file}" "${url}"
-  tar -xzf "${tmpdir}/${file}" -C "${tmpdir}"
+  curl -fsSL --retry 3 -o "${tmpdir}/${file}" "${url}"
 
-  local bin_path
-  bin_path="$(find "${tmpdir}" -type f -name sing-box | head -n 1)"
+  if ! tar -xzf "${tmpdir}/${file}" -C "${tmpdir}" 2>/dev/null; then
+    echo -e "${RED_BG}[ERROR] Failed to extract sing-box archive${NORMAL}"
+    rm -rf "${tmpdir}"
+    exit 1
+  fi
+
+  bin_path="$(find "${tmpdir}" -type f -name sing-box 2>/dev/null | head -n 1)"
   if [[ -z "${bin_path}" ]]; then
-    echo -e "${RED_BG}[ERROR] sing-box binary not found.${NORMAL}"
+    echo -e "${RED_BG}[ERROR] sing-box binary not found in archive${NORMAL}"
     rm -rf "${tmpdir}"
     exit 1
   fi
@@ -262,6 +280,7 @@ apply_network_optimization() {
 # Hysteria2 Network Optimization
 # Hostname: ${HOSTNAME}
 # Date: $(date '+%Y-%m-%d %H:%M:%S')
+# Port Hopping: ${HOPS_START}-${HOPS_END}
 # ============================================
 
 net.core.default_qdisc=fq_pie
@@ -364,9 +383,15 @@ EOF
   chmod 600 "${HY2_DIR}/${HY2_PORT}/server.key"
   chmod 644 "${HY2_DIR}/${HY2_PORT}/server.crt"
 
-  cat > "${HY2_DIR}/${HY2_PORT}/config.yaml" <<EOF
-listen: :${HY2_PORT}
+  # 生成端口跳跃配置
+  local ports_yaml=""
+  for port in ${HY2_HOPS_PORTS}; do
+    ports_yaml="${ports_yaml}  - :${port}\n"
+  done
 
+  cat > "${HY2_DIR}/${HY2_PORT}/config.yaml" <<EOF
+listen:
+${ports_yaml}
 tls:
   cert: ${HY2_DIR}/${HY2_PORT}/server.crt
   key: ${HY2_DIR}/${HY2_PORT}/server.key
@@ -395,12 +420,14 @@ masquerade:
     url: https://www.apple.com
     rewriteHost: true
 EOF
+
+  echo -e "${GREEN_BG}[HY2] Port hopping configured: ${HOPS_START}-${HOPS_END} (${HOPS_COUNT} ports)${NORMAL}"
 }
 
 write_hy2_service() {
   cat > "/etc/systemd/system/${HY2_SERVICE}.service" <<EOF
 [Unit]
-Description=Hysteria 2 Server (${HOSTNAME} - Port ${HY2_PORT})
+Description=Hysteria 2 Server (${HOSTNAME} - Port Hopping ${HOPS_START}-${HOPS_END})
 After=network.target nss-lookup.target
 Wants=network-online.target
 
@@ -455,7 +482,7 @@ EOF
 write_singbox_service() {
   cat > "/etc/systemd/system/${SB_SERVICE}.service" <<EOF
 [Unit]
-Description=sing-box service
+Description=sing-box SOCKS5 service
 After=network.target nss-lookup.target
 
 [Service]
@@ -470,6 +497,64 @@ WantedBy=multi-user.target
 EOF
 }
 
+open_firewall_ports() {
+  echo -e "${GREEN_BG}[Firewall] Opening UDP ports ${HOPS_START}-${HOPS_END}...${NORMAL}"
+  echo -e "${CYAN_BG}[Firewall] Total ports to open: ${HOPS_COUNT}${NORMAL}"
+
+  local ports_range="${HOPS_START}:${HOPS_END}"
+
+  # firewalld
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    echo -e "${GREEN_BG}[Firewall] Using firewalld${NORMAL}"
+    firewall-cmd --permanent --add-port=${ports_range}/udp 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    echo -e "${GREEN_BG}[Firewall] firewalld rules applied${NORMAL}"
+    return 0
+
+  # ufw
+  elif command -v ufw >/dev/null 2>&1; then
+    echo -e "${GREEN_BG}[Firewall] Using ufw${NORMAL}"
+    ufw allow ${ports_range}/udp 2>/dev/null || true
+    echo -e "${GREEN_BG}[Firewall] ufw rules applied${NORMAL}"
+    return 0
+
+  # iptables (优先检查)
+  elif command -v iptables >/dev/null 2>&1; then
+    echo -e "${GREEN_BG}[Firewall] Using iptables${NORMAL}"
+    
+    # 检查是否已有 HY2_HOPS 链
+    if ! iptables -L HY2_HOPS -n >/dev/null 2>&1; then
+      iptables -N HY2_HOPS 2>/dev/null || true
+      iptables -I INPUT -p udp --dport ${HOPS_START}:${HOPS_END} -j HY2_HOPS 2>/dev/null || true
+    fi
+    
+    # 批量放行 (使用范围语法)
+    iptables -A HY2_HOPS -p udp --dport ${ports_range} -j ACCEPT 2>/dev/null || true
+    
+    echo -e "${GREEN_BG}[Firewall] iptables rules applied${NORMAL}"
+    return 0
+
+  # nftables
+  elif command -v nft >/dev/null 2>&1; then
+    echo -e "${GREEN_BG}[Firewall] Using nftables${NORMAL}"
+    nft add table ip filter 2>/dev/null || true
+    nft add chain ip filter input { type filter hook input priority 0 \; } 2>/dev/null || true
+    nft add rule ip filter input udp dport ${HOPS_START}-${HOPS_END} accept 2>/dev/null || true
+    echo -e "${GREEN_BG}[Firewall] nftables rules applied${NORMAL}"
+    return 0
+  fi
+
+  # 如果没有找到防火墙工具
+  echo -e "${YELLOW_BG}[WARNING] No firewall tool detected. Please open ports manually:${NORMAL}"
+  echo "  UDP ports: ${ports_range}"
+  echo ""
+  echo "  # iptables commands:"
+  echo "  iptables -A INPUT -p udp --dport ${ports_range} -j ACCEPT"
+  echo ""
+  echo "  # ufw commands:"
+  echo "  ufw allow ${ports_range}/udp"
+}
+
 port_in_use_by_other() {
   local port="$1"
   local own_name="$2"
@@ -482,19 +567,28 @@ port_in_use_by_other() {
 }
 
 stop_conflicting_services() {
-  if port_in_use_by_other "${HY2_PORT}" "${HY2_SERVICE}"; then
-    echo -e "${YELLOW_BG}[WARNING] Port ${HY2_PORT} is in use. Trying to stop old HY2 service...${NORMAL}"
-    systemctl stop "${HY2_SERVICE}" 2>/dev/null || true
-    pkill -f "${HY2_DIR}/hy2" 2>/dev/null || true
-    sleep 1
-  fi
+  # 检查跳跃端口范围内的占用
+  local hop_port=""
+  for hop_port in ${HY2_HOPS_PORTS}; do
+    if port_in_use_by_other "${hop_port}" "${HY2_SERVICE}"; then
+      echo -e "${YELLOW_BG}[WARNING] Port ${hop_port} is in use. Stopping old services...${NORMAL}"
+      break
+    fi
+  done
 
-  if port_in_use_by_other "${SOCKS_PORT}" "sing-box"; then
-    echo -e "${YELLOW_BG}[WARNING] Port ${SOCKS_PORT} is in use. Trying to stop old sing-box service...${NORMAL}"
-    systemctl stop "${SB_SERVICE}" 2>/dev/null || true
-    pkill -f "/usr/local/bin/sing-box" 2>/dev/null || true
-    sleep 1
+  if systemctl is-active --quiet "${HY2_SERVICE}" 2>/dev/null; then
+    echo -e "${YELLOW_BG}[WARNING] Stopping existing HY2 service...${NORMAL}"
+    systemctl stop "${HY2_SERVICE}" 2>/dev/null || true
   fi
+  pkill -f "${HY2_DIR}/hy2" 2>/dev/null || true
+
+  if systemctl is-active --quiet "${SB_SERVICE}" 2>/dev/null; then
+    echo -e "${YELLOW_BG}[WARNING] Stopping existing SOCKS5 service...${NORMAL}"
+    systemctl stop "${SB_SERVICE}" 2>/dev/null || true
+  fi
+  pkill -f "/usr/local/bin/sing-box" 2>/dev/null || true
+
+  sleep 2
 }
 
 start_services() {
@@ -526,20 +620,23 @@ start_services() {
 }
 
 generate_client_configs() {
-  hy2_url_v4="hysteria2://$(urlencode "${HY2_PASSWORD}")@${ip}:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}")"
-  hy2_url_compat_v4="hy2://$(urlencode "${HY2_PASSWORD}")@${ip}:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}")"
+  # 使用起始端口作为主连接端口
+  local main_port="${HOPS_START}"
+  
+  hy2_url_v4="hysteria2://$(urlencode "${HY2_PASSWORD}")@${ip}:${main_port}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#$(urlencode "${HOSTNAME}-HY2-Hop")"
+  hy2_url_compat_v4="hy2://$(urlencode "${HY2_PASSWORD}")@${ip}:${main_port}/?insecure=1&sni=${SNI_DOMAIN}#$(urlencode "${HOSTNAME}-HY2-Hop")"
 
   if [[ -n "${ipv6:-}" ]]; then
-    hy2_url_v6="hysteria2://$(urlencode "${HY2_PASSWORD}")@[${ipv6}]:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}-IPv6")"
-    hy2_url_compat_v6="hy2://$(urlencode "${HY2_PASSWORD}")@[${ipv6}]:${HY2_PORT}/?insecure=1&sni=${SNI_DOMAIN}#$(urlencode "${HOSTNAME}-HY2-${HY2_PORT}-IPv6")"
+    hy2_url_v6="hysteria2://$(urlencode "${HY2_PASSWORD}")@[${ipv6}]:${main_port}/?insecure=1&sni=${SNI_DOMAIN}&alpn=h3#$(urlencode "${HOSTNAME}-HY2-Hop-IPv6")"
+    hy2_url_compat_v6="hy2://$(urlencode "${HY2_PASSWORD}")@[${ipv6}]:${main_port}/?insecure=1&sni=${SNI_DOMAIN}#$(urlencode "${HOSTNAME}-HY2-Hop-IPv6")"
   fi
 
   json_config=$(cat <<EOF
 {
   "type": "hysteria2",
-  "tag": "${HOSTNAME}-HY2-${HY2_PORT}",
+  "tag": "${HOSTNAME}-HY2-Hop",
   "server": "${ip}",
-  "server_port": ${HY2_PORT},
+  "server_port": ${main_port},
   "password": "${HY2_PASSWORD}",
   "tls": {
     "enabled": true,
@@ -552,10 +649,10 @@ EOF
 )
 
   clash_config=$(cat <<EOF
-- name: ${HOSTNAME}-HY2-${HY2_PORT}
+- name: ${HOSTNAME}-HY2-Hop
   type: hysteria2
   server: ${ip}
-  port: ${HY2_PORT}
+  port: ${main_port}
   password: ${HY2_PASSWORD}
   skip-cert-verify: true
   sni: ${SNI_DOMAIN}
@@ -569,33 +666,44 @@ EOF
 HY2 + SOCKS5 客户端配置
 主机名: ${HOSTNAME}
 地区: ${REGION}
-服务器 IPv4: ${ip}:${HY2_PORT}
-$([ -n "${ipv6:-}" ] && echo "服务器 IPv6: [${ipv6}]:${HY2_PORT}")
+服务器 IPv4: ${ip}
+$([ -n "${ipv6:-}" ] && echo "服务器 IPv6: [${ipv6}]")
 
-[HY2]
-端口: ${HY2_PORT}
-密码: ${HY2_PASSWORD}
+========================================
+【HY2 端口跳跃】
+范围: ${HOPS_START} - ${HOPS_END}
+总数: ${HOPS_COUNT} 个 UDP 端口
+客户端随机选择任一端口连接
+
+========================================
+【HY2】
+主端口: ${main_port}
 SNI: ${SNI_DOMAIN}
+密码: ${HY2_PASSWORD}
 
-[SOCKS5]
+【SOCKS5】
 服务器: ${ip}
 端口: ${SOCKS_PORT}
 用户名: ${SOCKS_USER}
 密码: ${SOCKS_PASS}
 
 ========================================
-【Sing-box 配置 IPv4】
+【Sing-box JSON】
 ${json_config}
 
-【Clash Meta 配置 IPv4】
+【Clash Meta】
 ${clash_config}
 
 ========================================
-【v2rayN 链接 IPv4】
+【客户端链接】
 ${hy2_url_v4}
 
-【兼容格式链接 IPv4】
+【兼容格式】
 ${hy2_url_compat_v4}
+========================================
+
+注: 客户端连接时会自动随机使用 ${HOPS_START}-${HOPS_END}
+    范围内的任一端口进行通信
 ========================================
 EOF
 }
@@ -611,8 +719,9 @@ print_result() {
   echo -e "${GREEN_BG}服务器 IPv4:${NORMAL} ${ip}"
   [[ -n "${ipv6:-}" ]] && echo -e "${CYAN_BG}服务器 IPv6:${NORMAL} ${ipv6}"
   echo ""
-  echo -e "${GREEN_BG}[HY2]${NORMAL}"
-  echo "  端口: ${HY2_PORT}"
+  echo -e "${GREEN_BG}[HY2 端口跳跃]${NORMAL}"
+  echo "  范围: ${HOPS_START} - ${HOPS_END}"
+  echo "  数量: ${HOPS_COUNT} 个 UDP 端口"
   echo "  密码: ${HY2_PASSWORD}"
   echo "  SNI: ${SNI_DOMAIN}"
   echo "  链接: ${hy2_url_v4}"
@@ -635,12 +744,13 @@ print_result() {
 push_summary() {
   local telegram_message
   telegram_message=$(cat <<EOF
-🚀 *HY2 + SOCKS5 部署成功*
+🚀 *HY2 + SOCKS5 端口跳跃版部署成功*
 
 • 主机名: \`${HOSTNAME}\`
 • 地区: \`${REGION}\`
 • IPv4: \`${ip}\`
-• HY2 端口: \`${HY2_PORT}\`
+
+• *端口跳跃:* \`${HOPS_START}-${HOPS_END}\` (${HOPS_COUNT}个UDP端口)
 • HY2 密码: \`${HY2_PASSWORD}\`
 • SNI: \`${SNI_DOMAIN}\`
 
@@ -659,8 +769,10 @@ EOF
 
 main() {
   echo -e "${GREEN_BG}========================================${NORMAL}"
-  echo -e "${GREEN_BG}   HY2 + SOCKS5 Combined Installer${NORMAL}"
+  echo -e "${GREEN_BG}   HY2 + SOCKS5 Port Hopping Edition${NORMAL}"
+  echo -e "${GREEN_BG}   Ports: ${HOPS_START}-${HOPS_END} (${HOPS_COUNT} ports)${NORMAL}"
   echo -e "${GREEN_BG}========================================${NORMAL}"
+  echo ""
 
   get_public_ips
   install_or_update_hy2
@@ -670,6 +782,7 @@ main() {
   write_hy2_service
   write_singbox_config
   write_singbox_service
+  open_firewall_ports
   stop_conflicting_services
   start_services
   generate_client_configs
