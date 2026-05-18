@@ -21,7 +21,8 @@ HY2_PORT="52015"
 HY2_PASSWORD="Aq112211!"
 SNI_DOMAIN="icloud.cdn-apple.com"
 
-SOCKS_PORT="40443"
+SOCKS_PORT="40443"  # 首选端口
+SOCKS_PORT_FALLBACK="40444"  # 备用端口
 SOCKS_USER="soga"
 SOCKS_PASS="sogasoga"
 
@@ -172,6 +173,27 @@ get_public_ips() {
     echo -e "${RED_BG}[ERROR] Unable to detect IPv4 automatically.${NORMAL}"
     exit 1
   fi
+}
+
+# 新增函数：检查端口可用性并自动选择备用端口
+check_and_select_socks_port() {
+  local port_to_check="$1"
+  local port_name="$2"
+  
+  # 检查端口是否被占用
+  if ss -tulnp 2>/dev/null | grep -q ":${port_to_check} "; then
+    echo -e "${YELLOW_BG}[Port] Port ${port_to_check} is in use by another service${NORMAL}"
+    return 1
+  fi
+  
+  # 检查端口是否可用
+  if ! ss -tulnp 2>/dev/null | grep -q ":${port_to_check} " && \
+     ! lsof -i :${port_to_check} 2>/dev/null | grep -q "LISTEN"; then
+    echo -e "${GREEN_BG}[Port] Port ${port_to_check} is available${NORMAL}"
+    return 0
+  fi
+  
+  return 1
 }
 
 get_latest_hy2_version() {
@@ -489,12 +511,7 @@ stop_conflicting_services() {
     sleep 1
   fi
 
-  if port_in_use_by_other "${SOCKS_PORT}" "sing-box"; then
-    echo -e "${YELLOW_BG}[WARNING] Port ${SOCKS_PORT} is in use. Trying to stop old sing-box service...${NORMAL}"
-    systemctl stop "${SB_SERVICE}" 2>/dev/null || true
-    pkill -f "/usr/local/bin/sing-box" 2>/dev/null || true
-    sleep 1
-  fi
+  # 这里不需要再次处理SOCKS端口冲突，因为我们会在check_and_select_socks_port中处理
 }
 
 start_services() {
@@ -622,6 +639,14 @@ print_result() {
   echo "  端口: ${SOCKS_PORT}"
   echo "  用户名: ${SOCKS_USER}"
   echo "  密码: ${SOCKS_PASS}"
+  
+  # 显示端口切换信息（如果发生了切换）
+  if [[ "${SOCKS_PORT}" != "40443" ]]; then
+    echo ""
+    echo -e "${YELLOW_BG}[端口切换]${NORMAL}"
+    echo "  40443端口被占用，已自动切换到 ${SOCKS_PORT} 端口"
+  fi
+  
   echo ""
   echo -e "${WHITE_BG}管理命令:${NORMAL}"
   echo "  HY2 状态: systemctl status ${HY2_SERVICE}"
@@ -652,6 +677,7 @@ push_summary() {
 \`${hy2_url_v4}\`
 
 时间: $(date '+%Y-%m-%d %H:%M:%S')
+$([ "${SOCKS_PORT}" != "40443" ] && echo "⚠️ 注意: 40443端口被占用，已使用备用端口 ${SOCKS_PORT}")
 EOF
 )
   send_telegram "${telegram_message}"
@@ -666,6 +692,23 @@ main() {
   install_or_update_hy2
   install_or_update_singbox
   apply_network_optimization
+  
+  # 检查端口可用性，自动选择备用端口
+  echo -e "${GREEN_BG}[Port] Checking SOCKS5 port availability...${NORMAL}"
+  if ! check_and_select_socks_port "${SOCKS_PORT}" "首选"; then
+    echo -e "${YELLOW_BG}[Port] Primary port ${SOCKS_PORT} is not available, trying fallback ${SOCKS_PORT_FALLBACK}...${NORMAL}"
+    if check_and_select_socks_port "${SOCKS_PORT_FALLBACK}" "备用"; then
+      SOCKS_PORT="${SOCKS_PORT_FALLBACK}"
+      echo -e "${GREEN_BG}[Port] Using fallback port: ${SOCKS_PORT}${NORMAL}"
+    else
+      echo -e "${RED_BG}[ERROR] Neither primary port ${SOCKS_PORT} nor fallback port ${SOCKS_PORT_FALLBACK} is available${NORMAL}"
+      echo -e "${RED_BG}[ERROR] Please check port usage and try again${NORMAL}"
+      exit 1
+    fi
+  else
+    echo -e "${GREEN_BG}[Port] Using primary port: ${SOCKS_PORT}${NORMAL}"
+  fi
+  
   prepare_hy2_cert_and_config
   write_hy2_service
   write_singbox_config
