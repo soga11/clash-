@@ -1,53 +1,39 @@
 cat > /root/deploy.sh << 'EOF'
 #!/bin/sh
-# ===== HY2 + SOCKS5 全系统通用一键脚本 =====
-# 支持: Debian/Ubuntu/CentOS/Alpine + systemd/openrc/nohup
-# 配置不变，端口冲突自动清理
-
 set -e
 
-# ===== 配置 =====
 SOCKS_PORT=40443; SOCKS_USER="soga"; SOCKS_PASS="sogasoga"
 HY2_PORT=52015;   HY2_PASS="Aq112211!"; HY2_SNI="icloud.cdn-apple.com"
 
-# ===== 架构 =====
 case "$(uname -m)" in
   x86_64)  A="amd64" ;;
   aarch64) A="arm64" ;;
-  *) echo "不支持架构: $(uname -m)"; exit 1 ;;
+  *) echo "不支持架构"; exit 1 ;;
 esac
 
-# ===== 清理旧进程和服务 =====
-echo "[0/5] 清理旧进程..."
-pkill -f sing-box 2>/dev/null || true
-pkill -f hysteria  2>/dev/null || true
-# 释放端口（fuser 或 ss+kill）
+# ===== 清理（只杀明确的 pid，不用 pkill）=====
+echo "[0/5] 清理..."
 for PORT in $SOCKS_PORT $HY2_PORT; do
-  PID=$(ss -tlnup 2>/dev/null | grep ":${PORT}" | grep -oP 'pid=\K[0-9]+' | head -1)
-  [ -n "$PID" ] && kill -9 "$PID" 2>/dev/null || true
-  PID=$(ss -ulnup 2>/dev/null | grep ":${PORT}" | grep -oP 'pid=\K[0-9]+' | head -1)
-  [ -n "$PID" ] && kill -9 "$PID" 2>/dev/null || true
+  for PROTO in t u; do
+    PID=$(ss -${PROTO}lnup 2>/dev/null | grep ":${PORT} " | grep -oP 'pid=\K[0-9]+' | head -1)
+    [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
+  done
 done
-# 清理 systemd 服务
 if command -v systemctl >/dev/null 2>&1; then
   systemctl stop socks hy2 2>/dev/null || true
-  systemctl disable socks hy2 2>/dev/null || true
   rm -f /etc/systemd/system/socks.service /etc/systemd/system/hy2.service
   systemctl daemon-reload 2>/dev/null || true
 fi
-# 清理 openrc 服务
-if command -v rc-update >/dev/null 2>&1; then
+if command -v rc-service >/dev/null 2>&1; then
   rc-service socks stop 2>/dev/null || true
   rc-service hy2 stop 2>/dev/null || true
-  rc-update del socks 2>/dev/null || true
-  rc-update del hy2 2>/dev/null || true
   rm -f /etc/init.d/socks /etc/init.d/hy2
 fi
 rm -f /usr/local/bin/sing-box /usr/local/bin/hysteria
 sleep 1
 
-# ===== 安装依赖 =====
-echo "[1/5] 安装依赖..."
+# ===== 依赖 =====
+echo "[1/5] 依赖..."
 if command -v apt-get >/dev/null 2>&1; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl openssl 2>/dev/null
 elif command -v apk >/dev/null 2>&1; then
@@ -56,8 +42,8 @@ elif command -v yum >/dev/null 2>&1; then
   yum install -y -q curl openssl 2>/dev/null
 fi
 
-# ===== 安装 sing-box =====
-echo "[2/5] 安装 sing-box..."
+# ===== sing-box =====
+echo "[2/5] sing-box..."
 curl -sL --retry 3 -o /tmp/sb.tar.gz \
   "https://github.com/SagerNet/sing-box/releases/download/v1.13.11/sing-box-1.13.11-linux-${A}.tar.gz"
 tar -xzf /tmp/sb.tar.gz -C /tmp
@@ -65,15 +51,15 @@ cp /tmp/sing-box-*/sing-box /usr/local/bin/
 chmod +x /usr/local/bin/sing-box
 rm -rf /tmp/sb.tar.gz /tmp/sing-box-*
 
-# ===== 安装 hysteria2 =====
-echo "[3/5] 安装 hysteria2..."
+# ===== hysteria2 =====
+echo "[3/5] hysteria2..."
 curl -sL --retry 3 \
   "https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-${A}" \
   -o /usr/local/bin/hysteria
 chmod +x /usr/local/bin/hysteria
 
 # ===== 证书 =====
-echo "[4/5] 生成证书..."
+echo "[4/5] 证书..."
 mkdir -p /root/hy2-cert
 openssl ecparam -genkey -name prime256v1 -out /root/hy2-cert/key.pem 2>/dev/null
 openssl req -new -x509 -days 3650 \
@@ -81,7 +67,7 @@ openssl req -new -x509 -days 3650 \
   -out /root/hy2-cert/cert.pem \
   -subj "/CN=${HY2_SNI}" 2>/dev/null
 
-# ===== 配置文件 =====
+# ===== 配置 =====
 cat > /root/socks.json << CONF
 {"log":{"level":"warn"},"inbounds":[{"type":"socks","listen":"0.0.0.0","listen_port":${SOCKS_PORT},"users":[{"username":"${SOCKS_USER}","password":"${SOCKS_PASS}"}]}],"outbounds":[{"type":"direct"}]}
 CONF
@@ -101,11 +87,9 @@ masquerade:
     rewriteHost: true
 CONF
 
-# ===== 注册服务 =====
-echo "[5/5] 启动服务..."
-
-if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-  # systemd
+# ===== 启动 =====
+echo "[5/5] 启动..."
+if [ -d /run/systemd/system ]; then
   cat > /etc/systemd/system/socks.service << CONF
 [Unit]
 Description=SOCKS5
@@ -133,7 +117,6 @@ CONF
   systemctl start socks hy2
 
 elif command -v rc-update >/dev/null 2>&1; then
-  # openrc (Alpine)
   cat > /etc/init.d/socks << CONF
 #!/sbin/openrc-run
 command="/usr/local/bin/sing-box"
@@ -155,22 +138,21 @@ CONF
   rc-service hy2 start
 
 else
-  # 兜底 nohup
   nohup /usr/local/bin/sing-box run -c /root/socks.json >/var/log/socks.log 2>&1 &
   nohup /usr/local/bin/hysteria server -c /root/hy2.yaml >/var/log/hy2.log 2>&1 &
 fi
 
-# ===== 验证 =====
+# ===== 结果 =====
 sleep 3
-IP=$(curl -s4 --retry 3 --max-time 5 https://api.ipify.org 2>/dev/null || ip route get 1 | awk '{print $NF;exit}')
+IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null || ip route get 1 2>/dev/null | awk '{print $NF;exit}')
 PW=$(printf '%s' "$HY2_PASS" | sed 's/!/%21/g')
+SOCKS_OK=$(ss -tlnup 2>/dev/null | grep -c ":${SOCKS_PORT} " || echo 0)
+HY2_OK=$(ss -ulnup 2>/dev/null | grep -c ":${HY2_PORT} " || echo 0)
 
 echo ""
 echo "========================================="
-SOCKS_OK=$(ss -tlnup 2>/dev/null | grep -c ":${SOCKS_PORT}" || echo 0)
-HY2_OK=$(ss -ulnup 2>/dev/null | grep -c ":${HY2_PORT}" || echo 0)
-[ "$SOCKS_OK" -ge 1 ] && echo "✅ SOCKS5 运行正常" || echo "❌ SOCKS5 未启动"
-[ "$HY2_OK"   -ge 1 ] && echo "✅ HY2   运行正常" || echo "❌ HY2   未启动"
+[ "$SOCKS_OK" -ge 1 ] && echo "✅ SOCKS5 正常" || echo "❌ SOCKS5 未启动"
+[ "$HY2_OK"   -ge 1 ] && echo "✅ HY2   正常" || echo "❌ HY2   未启动"
 echo ""
 echo "SOCKS5 : socks5://${SOCKS_USER}:${SOCKS_PASS}@${IP}:${SOCKS_PORT}"
 echo "HY2    : hysteria2://${PW}@${IP}:${HY2_PORT}?sni=${HY2_SNI}&insecure=1"
