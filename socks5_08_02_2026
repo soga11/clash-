@@ -1,0 +1,621 @@
+#!/bin/bash
+# =================================================================================
+# High-Performance Socks5 Proxy Management Matrix
+# Production-grade deployment script for Linux environments
+# =================================================================================
+
+export TERM=${TERM:-xterm-256color}
+export DEBIAN_FRONTEND=noninteractive
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
+CONFIG_FILE="/etc/socks5_gost.conf"
+SHORTCUT_BIN="/usr/local/bin/S5"
+UI_WIDTH=66
+
+# Terminal Color and Style Definitions
+ESC=$(printf '\033')
+BOLD="${ESC}[1m"
+RESET="${ESC}[0m"
+
+COLOR_MAIN="${ESC}[38;5;51m"   # Primary Theme Color
+COLOR_SEC="${ESC}[38;5;141m"   # Secondary Accent Color
+COLOR_SUC="${ESC}[38;5;46m"    # Success State Color
+COLOR_ERR="${ESC}[38;5;196m"   # Error/Danger Color
+COLOR_WAR="${ESC}[38;5;226m"   # Warning Color
+COLOR_TXT="${ESC}[38;5;231m"   # Standard Text Color
+COLOR_DIM="${ESC}[38;5;245m"   # Muted/Dim Color
+COLOR_INF="${ESC}[38;5;39m"    # Information Highlight
+
+ICON_OK="${COLOR_SUC}${BOLD}✔${RESET}"
+ICON_ERR="${COLOR_ERR}${BOLD}✖${RESET}"
+ICON_WARN="${COLOR_WAR}${BOLD}⚠${RESET}"
+ICON_INFO="${COLOR_INF}${BOLD}ℹ${RESET}"
+ICON_STEP="${COLOR_MAIN}${BOLD}⚡${RESET}"
+ICON_NOTE="${COLOR_SEC}${BOLD}💡${RESET}"
+
+# =================================================================================
+# UI Rendering and ASCII Banner Engine (Boxed Clean Matrix)
+# =================================================================================
+get_visual_len() {
+    local clean_str
+    clean_str=$(echo -e "$1" | sed 's/\x1b\[[0-9;]*m//g')
+    local char_len=${#clean_str}
+    local byte_len=$(printf "%s" "$clean_str" | wc -c)
+    echo $(( (char_len + byte_len) / 2 ))
+}
+
+draw_line() {
+    local color="${1:-$COLOR_MAIN}"
+    echo -e "${color}══════════════════════════════════════════════════════════════════${RESET}"
+}
+
+draw_dash() {
+    local color="${1:-$COLOR_SEC}"
+    echo -e "${color}──────────────────────────────────────────────────────────────────${RESET}"
+}
+
+print_center() {
+    local text="$1"
+    local color="${2:-$COLOR_TXT}"
+    local text_len
+    text_len=$(get_visual_len "$text")
+    local pad=$(( (UI_WIDTH - text_len) / 2 ))
+    [ $pad -lt 0 ] && pad=0
+    printf "%${pad}s" ""
+    echo -e "${BOLD}${color}${text}${RESET}"
+}
+
+print_banner() {
+    clear
+    echo -e "${COLOR_MAIN}${BOLD}"
+    echo "  ╔════════════════════════════════════════════════════════════╗"
+    echo "  ║                                                           ︎ ║"
+    echo "  ║   ███████╗  ██████╗   ██████╗  ██╗  ██╗  ███████╗  ███████ ║"
+    echo "  ║   ██╔════╝ ██╔═══██╗ ██╔════╝  ██║ ██╔╝  ██╔════╝  ██╔════ ║"
+    echo "  ║   ███████╗ ██║   ██║ ██║       █████╔╝   ███████╗  ███████ ║"
+    echo "  ║   ╚════██║ ██║   ██║ ██║       ██╔═██╗   ╚════██║       ██ ║"
+    echo "  ║   ███████║ ╚██████╔╝ ╚██████╗  ██║  ██╗  ███████║  ███████ ║"
+    echo "  ║                                                          ︎  ║"
+    echo "  ╚════════════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+    draw_line "$COLOR_MAIN"
+    print_center "PRODUCTION GRADE PROXY MANAGEMENT MATRIX" "$COLOR_INF"
+    draw_line "$COLOR_MAIN"
+    echo ""
+}
+
+print_step() { echo -e "${ICON_STEP} ${COLOR_TXT}${BOLD}$1${RESET}"; }
+print_info() { echo -e "   ${ICON_INFO} ${COLOR_DIM}$1${RESET}"; }
+print_warn() { echo -e "   ${ICON_WARN} ${COLOR_WAR}${BOLD}$1${RESET}"; }
+print_ok()   { echo -e "   ${ICON_OK} ${COLOR_SUC}${BOLD}$1${RESET}"; }
+print_err()  { echo -e "   ${ICON_ERR} ${COLOR_ERR}${BOLD}$1${RESET}"; }
+print_note() { echo -e "   ${ICON_NOTE} ${COLOR_SEC}${BOLD}[提示]: ${COLOR_DIM}$1${RESET}"; }
+
+# =================================================================================
+# Global Shortcut Management and Persistent Configuration
+# =================================================================================
+install_shortcut() {
+    mkdir -p /usr/local/bin 2>/dev/null
+    local current_script
+    current_script=$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")
+    
+    if [ -f "$current_script" ] && [ "$current_script" != "$SHORTCUT_BIN" ]; then
+        cat << 'EOF_S5' > "$SHORTCUT_BIN"
+#!/bin/bash
+curl -fsSL "https://gist.githubusercontent.com/Puthsent/36817edc52867fd74559fde96339af99/raw/S5" -o /tmp/s5_latest.sh 2>/dev/null
+if [ -s /tmp/s5_latest.sh ]; then
+    bash /tmp/s5_latest.sh "$@"
+else
+    echo -e "\033[31m[✖] 网络通信错误，无法获取控制面板。\033[0m"
+fi
+EOF_S5
+        chmod +x "$SHORTCUT_BIN" 2>/dev/null
+    fi
+}
+
+save_config() {
+    print_note "正在持久化保存配置参数到本地存储..."
+    cat << EOF > "$CONFIG_FILE"
+SERVER_IP="${SERVER_IP}"
+SOCKS_PORT="${SOCKS_PORT}"
+SOCKS_USER="${SOCKS_USER}"
+SOCKS_PASS="${SOCKS_PASS}"
+EOF
+    chmod 600 "$CONFIG_FILE"
+    print_ok "配置已通过严格权限控制加密保存 [600]"
+}
+
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE"
+        return 0
+    fi
+    return 1
+}
+
+# =================================================================================
+# Environment Initialization and Network Diagnostic Probes
+# =================================================================================
+check_environment_and_deps() {
+    print_banner
+    print_step "[1/5] 正在初始化系统环境与依赖组件"
+    
+    [ "$(id -u)" -ne 0 ] && { print_err "权限拒绝：必须使用 Root 权限，请通过 sudo -i 运行。"; exit 1; }
+
+    if grep -qi "alpine" /etc/os-release 2>/dev/null; then OS_TYPE="alpine";
+    elif grep -qiE "debian|ubuntu" /etc/os-release 2>/dev/null; then OS_TYPE="debian";
+    elif grep -qiE "centos|rhel|fedora|rocky|almalinux" /etc/os-release 2>/dev/null; then OS_TYPE="rhel";
+    else OS_TYPE="generic"; fi
+    
+    print_info "检测到操作系统发行版：${COLOR_TXT}${BOLD}${OS_TYPE}${RESET}"
+
+    local NEED_INSTALL=()
+    for cmd in curl wget bash iptables gzip tar ping ip; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then NEED_INSTALL+=("$cmd"); fi
+    done
+
+    if [ ${#NEED_INSTALL[@]} -ne 0 ]; then
+        print_note "正在安装缺少的必要软件包：[ ${NEED_INSTALL[*]} ]..."
+        case "$OS_TYPE" in
+            alpine) apk add --no-cache "${NEED_INSTALL[@]}" iproute2 iputils >/dev/null 2>&1 ;;
+            debian) apt-get update -qq >/dev/null 2>&1; apt-get install -yqq --no-install-recommends "${NEED_INSTALL[@]}" iproute2 iputils-ping >/dev/null 2>&1 ;;
+            rhel) command -v dnf >/dev/null 2>&1 && dnf install -y -q "${NEED_INSTALL[@]}" iproute iputils >/dev/null 2>&1 || yum install -y -q "${NEED_INSTALL[@]}" iproute iputils >/dev/null 2>&1 ;;
+        esac
+    fi
+
+    if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 || curl -s4m 2 https://8.8.8.8 >/dev/null 2>&1; then
+        print_ok "主网络路由检查通过 [8.8.8.8]"
+    elif ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1 || curl -s4m 2 https://1.1.1.1 >/dev/null 2>&1; then
+        print_warn "主路由超时，已验证备用网络路由 [1.1.1.1]"
+    else
+        print_err "致命错误：网络连接检查失败，请验证外网访问。"; exit 1
+    fi
+}
+
+# =================================================================================
+# Public IP Detection and Interactive Parameter Configuration
+# =================================================================================
+collect_parameters() {
+    print_banner
+    print_step "[2/5] 正在配置运行时参数与网络绑定"
+    draw_dash "$COLOR_SEC"
+
+    print_info "正在通过多源 API 探测公网 IP 地址..."
+    AUTO_IP=""
+    for api in "https://api.ipify.org" "https://ifconfig.me" "https://ip.sb" "https://icanhazip.com" "https://ipinfo.io/ip"; do
+        AUTO_IP=$(curl -4sSL --connect-timeout 2 --max-time 3 "$api" 2>/dev/null | tr -d ' \t\r\n')
+        if [[ -n "$AUTO_IP" && "$AUTO_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            break
+        fi
+    done
+
+    RANDOM_PORT=$((RANDOM % 50000 + 10000))
+    DEFAULT_USER="admin"
+    DEFAULT_PASS="123456789"
+
+    echo ""
+    while true; do
+        if [ -n "$AUTO_IP" ]; then
+            printf "   ${COLOR_INF}${BOLD}🌐 确认公网 IP [回车接受自动检测: ${COLOR_SUC}%s${RESET}${COLOR_INF}${BOLD}]: ${RESET}" "$AUTO_IP"
+            read -r INPUT_IP < /dev/tty 2>/dev/null || read -r INPUT_IP
+            SERVER_IP=${INPUT_IP:-$AUTO_IP}
+        else
+            printf "   ${COLOR_INF}${BOLD}🌐 自动检测失败，请输入服务器公网 IP: ${RESET}"
+            read -r SERVER_IP < /dev/tty 2>/dev/null || read -r SERVER_IP
+        fi
+        SERVER_IP=$(echo "$SERVER_IP" | tr -d ' \t\r\n')
+        [ -n "$SERVER_IP" ] && break || print_warn "公网 IP 不能为空。"
+    done
+    print_info "已绑定有效服务器 IP：${COLOR_TXT}${BOLD}${SERVER_IP}${RESET}"
+
+    echo ""
+    while true; do
+        printf "   ${COLOR_INF}${BOLD}🔌 设置监听端口 [回车启用随机端口: ${COLOR_SUC}%s${RESET}${COLOR_INF}${BOLD}]: ${RESET}" "$RANDOM_PORT"
+        read -r INPUT_PORT < /dev/tty 2>/dev/null || read -r INPUT_PORT
+        SOCKS_PORT=${INPUT_PORT:-$RANDOM_PORT}
+        SOCKS_PORT=$(echo "$SOCKS_PORT" | tr -d ' \t\r\n')
+
+        case "$SOCKS_PORT" in
+            ''|*[!0-9]*) print_warn "格式无效：端口必须仅由数字组成。" ;;
+            *)
+                if [ "$SOCKS_PORT" -ge 1024 ] && [ "$SOCKS_PORT" -le 65535 ]; then
+                    local port_busy=0
+                    command -v ss >/dev/null 2>&1 && ss -tuln 2>/dev/null | grep -qE "[:.]$SOCKS_PORT([[:space:]]|$)" && port_busy=1
+                    command -v netstat >/dev/null 2>&1 && netstat -tuln 2>/dev/null | grep -qE "[:.]$SOCKS_PORT([[:space:]]|$)" && port_busy=1
+                    [ "$port_busy" -eq 1 ] && print_warn "端口冲突：指定端口已被占用，请更换。" || break
+                else
+                    print_warn "范围错误：端口必须在 1024 到 65535 之间。"
+                fi
+                ;;
+        esac
+    done
+    print_info "已锁定有效监听端口：${COLOR_TXT}${BOLD}${SOCKS_PORT}${RESET}"
+
+    echo ""
+    while true; do
+        printf "   ${COLOR_INF}${BOLD}👤 设置代理用户名 [回车使用默认值: ${COLOR_SUC}%s${RESET}${COLOR_INF}${BOLD}]: ${RESET}" "$DEFAULT_USER"
+        read -r INPUT_USER < /dev/tty 2>/dev/null || read -r INPUT_USER
+        SOCKS_USER=${INPUT_USER:-$DEFAULT_USER}
+        SOCKS_USER=$(echo "$SOCKS_USER" | tr -d ' \t\r\n')
+        [ -n "$SOCKS_USER" ] && break || print_warn "用户名不能为空。"
+    done
+    print_info "已锁定代理用户名：${COLOR_TXT}${BOLD}${SOCKS_USER}${RESET}"
+
+    echo ""
+    while true; do
+        printf "   ${COLOR_INF}${BOLD}🔑 设置代理密码 [回车使用默认值: ${COLOR_SUC}%s${RESET}${COLOR_INF}${BOLD}]: ${RESET}" "$DEFAULT_PASS"
+        read -r INPUT_PASS < /dev/tty 2>/dev/null || read -r INPUT_PASS
+        SOCKS_PASS=${INPUT_PASS:-$DEFAULT_PASS}
+        SOCKS_PASS=$(echo "$SOCKS_PASS" | tr -d ' \t\r\n')
+        [ -n "$SOCKS_PASS" ] && break || print_warn "密码不能为空。"
+    done
+    print_info "已锁定代理密码：${COLOR_TXT}${BOLD}${SOCKS_PASS}${RESET}"
+
+    command -v systemctl >/dev/null 2>&1 && systemctl stop socks5 >/dev/null 2>&1 || true
+    command -v rc-service >/dev/null 2>&1 && rc-service socks5 stop >/dev/null 2>&1 || true
+    pkill -9 -f "gost.*socks5" >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/socks5.service /etc/init.d/socks5
+    
+    save_config
+}
+
+# =================================================================================
+# Core Binary Download with Multi-Mirror Fallback and Service Daemon Setup
+# =================================================================================
+download_core() {
+    print_banner
+    print_step "[3/5] 正在下载核心代理引擎并安装二进制文件"
+    
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64)  DL_FILE="gost-linux-amd64-2.11.5.gz" ;;
+        aarch64|arm64) DL_FILE="gost-linux-armv8-2.11.5.gz" ;;
+        armv7l|armv7)  DL_FILE="gost-linux-armv7-2.11.5.gz" ;;
+        i386|i686)     DL_FILE="gost-linux-386-2.11.5.gz" ;;
+        *) print_err "不支持的 CPU 架构：${ARCH}"; exit 1 ;;
+    esac
+
+    local U1="https://github.com/ginuerzh/gost/releases/download/v2.11.5/${DL_FILE}"
+    local U2="https://ghp.ci/${U1}"
+    local U3="https://ghproxy.net/${U1}"
+    local U4="https://mirror.ghproxy.com/${U1}"
+    local U5="https://edgetunnel.org/${U1}"
+
+    print_note "正在从全局分发镜像获取核心二进制文件..."
+    local DL_OK=0
+    for mirror in "$U2" "$U3" "$U4" "$U5" "$U1"; do
+        if curl -fsSL -m 5 --retry 1 -o /tmp/gost.gz "$mirror" 2>/dev/null && [ -s /tmp/gost.gz ]; then
+            DL_OK=1
+            break
+        fi
+    done
+
+    if [ "$DL_OK" -ne 1 ]; then
+        print_err "下载失败：所有镜像端点均无法访问，请检查网络或防火墙设置。"
+        exit 1
+    fi
+
+    gzip -d -f /tmp/gost.gz
+    chmod +x /tmp/gost
+    mv -f /tmp/gost /usr/local/bin/gost
+    print_ok "Gost 代理引擎部署成功 [/usr/local/bin/gost]"
+}
+
+setup_daemon() {
+    print_banner
+    print_step "[4/5] 正在配置系统服务守护进程与开机自启策略"
+
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1; then
+        print_note "已识别 Systemd 环境，正在生成服务配置..."
+        cat << EOF > /etc/systemd/system/socks5.service
+[Unit]
+Description=Gost Socks5 Matrix Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+LimitNOFILE=1048576
+ExecStart=/usr/local/bin/gost -L socks5://${SOCKS_USER}:${SOCKS_PASS}@:${SOCKS_PORT}
+Restart=always
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+        systemctl enable socks5 >/dev/null 2>&1
+        systemctl restart socks5
+        print_ok "Systemd 服务守护进程成功加载并启动。"
+
+    elif command -v openrc-run >/dev/null 2>&1 || command -v rc-service >/dev/null 2>&1; then
+        print_note "已识别 Alpine/OpenRC 环境，正在配置后台守护程序..."
+        cat << EOF > /etc/init.d/socks5
+#!/sbin/openrc-run
+name="socks5"
+description="Gost Socks5 Proxy Service"
+command="/usr/local/bin/gost"
+command_args="-L socks5://${SOCKS_USER}:${SOCKS_PASS}@:${SOCKS_PORT}"
+command_background="yes"
+pidfile="/run/socks5.pid"
+depend() {
+    need net
+}
+EOF
+        chmod +x /etc/init.d/socks5
+        rc-update add socks5 default >/dev/null 2>&1 || true
+        rc-service socks5 restart >/dev/null 2>&1
+        print_ok "OpenRC 原生服务守护进程部署成功。"
+    else
+        print_note "未找到标准服务管理器，降级使用后台 nohup 运行..."
+        nohup /usr/local/bin/gost -L socks5://${SOCKS_USER}:${SOCKS_PASS}@:${SOCKS_PORT} >/dev/null 2>&1 &
+        print_warn "已启动后台常驻运行模式。"
+    fi
+}
+
+configure_firewall() {
+    print_banner
+    print_step "[5/5] 正在配置系统防火墙规则与端口放行"
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -I INPUT -p tcp --dport "$SOCKS_PORT" -j ACCEPT 2>/dev/null || true
+        iptables -I INPUT -p udp --dport "$SOCKS_PORT" -j ACCEPT 2>/dev/null || true
+    fi
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "active"; then
+        ufw allow "$SOCKS_PORT"/tcp >/dev/null 2>&1 || true
+        ufw allow "$SOCKS_PORT"/udp >/dev/null 2>&1 || true
+    fi
+    print_ok "防火墙端口规则配置成功 [端口: ${SOCKS_PORT}]"
+}
+
+# =================================================================================
+# Real-time Socket Status Probes and Credential Card Presentation
+# =================================================================================
+get_service_status() {
+    load_config >/dev/null 2>&1
+    local is_running=0
+    
+    if [ -n "$SOCKS_PORT" ]; then
+        if command -v ss >/dev/null 2>&1 && ss -tuln 2>/dev/null | grep -qE "[:.]$SOCKS_PORT([[:space:]]|$)"; then
+            is_running=1
+        elif command -v netstat >/dev/null 2>&1 && netstat -tuln 2>/dev/null | grep -qE "[:.]$SOCKS_PORT([[:space:]]|$)"; then
+            is_running=1
+        fi
+    fi
+    
+    if [ "$is_running" -eq 0 ]; then
+        if pgrep -f "gost.*$SOCKS_PORT" >/dev/null 2>&1 || pgrep -x "gost" >/dev/null 2>&1; then
+            is_running=1
+        fi
+    fi
+
+    if [ "$is_running" -eq 1 ]; then
+        echo -e "${COLOR_SUC}${BOLD}🟢 运行中 (在线)${RESET}"
+    else
+        echo -e "${COLOR_ERR}${BOLD}🔴 已停止 (离线)${RESET}"
+    fi
+}
+
+get_autostart_status() {
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1; then
+        if systemctl is-enabled --quiet socks5 2>/dev/null; then
+            echo -e "${COLOR_SUC}${BOLD}已开启${RESET}"
+        else
+            echo -e "${COLOR_WAR}${BOLD}已关闭${RESET}"
+        fi
+    elif command -v rc-update >/dev/null 2>&1; then
+        if rc-update show default 2>/dev/null | grep -q "socks5"; then
+            echo -e "${COLOR_SUC}${BOLD}已开启${RESET}"
+        else
+            echo -e "${COLOR_WAR}${BOLD}已关闭${RESET}"
+        fi
+    else
+        echo -e "${COLOR_DIM}后台常驻 (无开机自启)${RESET}"
+    fi
+}
+
+show_credentials() {
+    load_config
+    print_banner
+    draw_line "$COLOR_MAIN"
+    print_center "SOCKS5 节点连接凭证信息" "$COLOR_SEC"
+    draw_line "$COLOR_MAIN"
+    echo ""
+    printf "   ${COLOR_INF}${BOLD}➤ 服务器公网 IP :${RESET}  ${COLOR_TXT}${BOLD}%s${RESET}\n" "${SERVER_IP}"
+    printf "   ${COLOR_INF}${BOLD}➤ 监听端口      :${RESET}  ${COLOR_TXT}${BOLD}%s${RESET}\n" "${SOCKS_PORT}"
+    printf "   ${COLOR_INF}${BOLD}➤ 认证账号      :${RESET}  ${COLOR_TXT}${BOLD}%s${RESET}\n" "${SOCKS_USER}"
+    printf "   ${COLOR_INF}${BOLD}➤ 认证密码      :${RESET}  ${COLOR_TXT}${BOLD}%s${RESET}\n" "${SOCKS_PASS}"
+    echo ""
+    draw_dash "$COLOR_SEC"
+    printf "   ${COLOR_WAR}${BOLD}🔗 标准 Socks5 连接链接 (URI) :${RESET}\n"
+    printf "   ${COLOR_MAIN}${BOLD}socks5://%s:%s@%s:%s${RESET}\n" \
+           "${SOCKS_USER}" "${SOCKS_PASS}" "${SERVER_IP}" "${SOCKS_PORT}"
+    draw_dash "$COLOR_SEC"
+    echo ""
+    echo -e "   ${COLOR_SEC}${BOLD}💡 [快捷提示]:${RESET} ${COLOR_TXT}在任意终端会话中输入 ${COLOR_SUC}${BOLD}S5${RESET}${COLOR_TXT} 即可随时重新打开本管理控制台。${RESET}"
+    echo ""
+    draw_line "$COLOR_MAIN"
+    printf "\n   ${COLOR_SEC}👉 按任意键返回主控制面板...${RESET}"
+    read -n 1 -s -r < /dev/tty 2>/dev/null || read -n 1 -s -r
+}
+
+# =================================================================================
+# Core Management Function Library
+# =================================================================================
+restart_service() {
+    print_banner
+    print_note "正在重载配置并平滑重启..."
+    load_config
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1; then 
+        systemctl restart socks5 >/dev/null 2>&1
+    elif command -v rc-service >/dev/null 2>&1; then 
+        rc-service socks5 restart >/dev/null 2>&1
+    else 
+        pkill -9 -f "gost" >/dev/null 2>&1; nohup /usr/local/bin/gost -L socks5://${SOCKS_USER}:${SOCKS_PASS}@:${SOCKS_PORT} >/dev/null 2>&1 &
+    fi
+    print_ok "引擎状态已刷新，配置更改已生效。"; sleep 1.5
+}
+
+stop_service() {
+    print_banner
+    print_note "正在终止活动的代理服务进程..."
+    command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1 && systemctl stop socks5 >/dev/null 2>&1
+    command -v rc-service >/dev/null 2>&1 && rc-service socks5 stop >/dev/null 2>&1
+    pkill -9 -f "gost" >/dev/null 2>&1 || true
+    print_warn "代理通信通道已安全关闭。"; sleep 1.5
+}
+
+toggle_autostart() {
+    print_banner
+    print_note "正在切换系统开机自启服务状态..."
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1; then
+        if systemctl is-enabled --quiet socks5 2>/dev/null; then
+            systemctl disable socks5 >/dev/null 2>&1; print_warn "已禁用开机自动启动。"
+        else
+            systemctl enable socks5 >/dev/null 2>&1; print_ok "已启用开机自动启动。"
+        fi
+    elif command -v rc-update >/dev/null 2>&1; then
+        if rc-update show default 2>/dev/null | grep -q "socks5"; then
+            rc-update del socks5 default >/dev/null 2>&1; print_warn "已禁用开机自动启动。"
+        else
+            rc-update add socks5 default >/dev/null 2>&1; print_ok "已启用开机自动启动。"
+        fi
+    else 
+        print_warn "当前环境不支持自启管理。"; 
+    fi
+    sleep 1.5
+}
+
+view_logs() {
+    print_banner
+    draw_line "$COLOR_MAIN"
+    print_center "系统运行日志与诊断信息" "$COLOR_SEC"
+    draw_line "$COLOR_MAIN"
+    echo ""
+    if command -v journalctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1; then
+        journalctl -u socks5 -n 20 --no-pager 2>/dev/null || echo "暂无可用的 systemd 日志记录。"
+    else
+        echo "系统正通过后台 nohup 或 OpenRC 运行。活跃进程："
+        ps aux | grep gost | grep -v grep || echo "未检测到活跃的 gost 进程。"
+    fi
+    echo ""
+    draw_dash "$COLOR_SEC"
+    printf "\n   ${COLOR_SEC}👉 按任意键返回主控制面板...${RESET}"
+    read -n 1 -s -r < /dev/tty 2>/dev/null || read -n 1 -s -r
+}
+
+test_port() {
+    print_banner
+    load_config
+    print_note "正在执行端口连通性与代理转发诊断..."
+    echo ""
+    if command -v nc >/dev/null 2>&1; then
+        nc -zv 127.0.0.1 "$SOCKS_PORT" 2>&1 && print_ok "本地环回检查通过。" || print_err "本地环回检查失败。"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -s --socks5 "${SOCKS_USER}:${SOCKS_PASS}@127.0.0.1:${SOCKS_PORT}" https://api.ipify.org -m 3 && print_ok "Socks5 隧道代理测试成功。" || print_err "代理隧道测试失败。"
+    else
+        print_warn "未找到诊断工具 (nc/curl)，已跳过深度测试。"
+    fi
+    echo ""
+    draw_dash "$COLOR_SEC"
+    printf "\n   ${COLOR_SEC}👉 按任意键返回主控制面板...${RESET}"
+    read -n 1 -s -r < /dev/tty 2>/dev/null || read -n 1 -s -r
+}
+
+update_script() {
+    print_banner
+    print_note "正在从远程源获取最新管理脚本..."
+    curl -fsSL "https://gist.githubusercontent.com/Puthsent/36817edc52867fd74559fde96339af99/raw/S5" -o /tmp/s5_update.sh 2>/dev/null
+    if [ -s /tmp/s5_update.sh ]; then
+        print_ok "更新脚本下载成功，正在更新面板..."
+        cp -f /tmp/s5_update.sh "$SHORTCUT_BIN" 2>/dev/null
+        chmod +x "$SHORTCUT_BIN" 2>/dev/null
+        bash /tmp/s5_update.sh
+        exit 0
+    else
+        print_err "更新失败：无法下载远程脚本，请验证网络访问。"
+        sleep 1.5
+    fi
+}
+
+uninstall_socks5() {
+    clear; print_banner
+    echo -e "   ${COLOR_ERR}${BOLD}⚠ 危险警告：此操作将彻底删除 SOCKS5 节点及相关配置！${RESET}\n"
+    printf "   ${COLOR_WAR}${BOLD}确定要继续执行卸载吗？(y/N): ${RESET}"
+    read -r CONFIRM < /dev/tty 2>/dev/null || read -r CONFIRM
+    if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+        print_banner
+        print_note "正在执行清理卸载程序..."
+        load_config; stop_service
+        if command -v iptables >/dev/null 2>&1 && [ -n "$SOCKS_PORT" ]; then
+            iptables -D INPUT -p tcp --dport "$SOCKS_PORT" -j ACCEPT 2>/dev/null
+            iptables -D INPUT -p udp --dport "$SOCKS_PORT" -j ACCEPT 2>/dev/null
+        fi
+        command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1 && { systemctl disable socks5 >/dev/null 2>&1; rm -f /etc/systemd/system/socks5.service; systemctl daemon-reload; }
+        command -v rc-service >/dev/null 2>&1 && { rc-update del socks5 default >/dev/null 2>&1; rm -f /etc/init.d/socks5; }
+        rm -f /usr/local/bin/gost "$SHORTCUT_BIN" "$CONFIG_FILE"
+        print_ok "系统已成功清理并恢复至初始状态。"; exit 0
+    else print_info "已取消卸载，返回主菜单。"; sleep 1.2; fi
+}
+
+# =================================================================================
+# Interactive Control Matrix Main Loop and Execution Entry
+# =================================================================================
+menu_ui() {
+    while true; do
+        load_config
+        print_banner
+        echo -e "  ${COLOR_SEC}${BOLD}┌────────────────────────────────────────────────────────────┐${RESET}"
+        echo -e "  ${COLOR_SEC}${BOLD}│${RESET}  ${ICON_NOTE} ${COLOR_TXT}${BOLD}快捷提示:${RESET} 在任意终端输入 ${COLOR_SUC}${BOLD}S5${RESET} 即可打开此控制台         ${COLOR_SEC}${BOLD}│${RESET}"
+        echo -e "  ${COLOR_SEC}${BOLD}└────────────────────────────────────────────────────────────┘${RESET}"
+        echo ""
+        echo -e "   📡 服务运行状态  : $(get_service_status)"
+        echo -e "   🚀 开机自启策略  : $(get_autostart_status)"
+        draw_dash "$COLOR_SEC"
+        echo -e "  ${COLOR_MAIN}${BOLD} [1]${RESET} ${COLOR_TXT} 查看连接凭证与链接信息${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [2]${RESET} ${COLOR_TXT} 启动 / 平滑重启代理服务${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [3]${RESET} ${COLOR_TXT} 停止 / 安全终止代理服务${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [4]${RESET} ${COLOR_TXT} 切换系统开机自启策略${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [5]${RESET} ${COLOR_TXT} 重新配置端口 / 凭证并重新部署${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [6]${RESET} ${COLOR_TXT} 查看系统运行日志与诊断${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [7]${RESET} ${COLOR_TXT} 执行本地端口与隧道诊断测试${RESET}"
+        echo -e "  ${COLOR_MAIN}${BOLD} [8]${RESET} ${COLOR_TXT} 检查脚本更新与热刷新${RESET}"
+        echo -e "  ${COLOR_ERR}${BOLD} [9]${RESET} ${COLOR_ERR} 完全卸载并清理系统环境${RESET}"
+        draw_dash "$COLOR_SEC"
+        echo -e "  ${COLOR_WAR}${BOLD} [0]${RESET} ${COLOR_TXT} 退出控制面板并返回 Shell${RESET}"
+        draw_line "$COLOR_MAIN"
+        echo ""
+        printf "  ${COLOR_INF}${BOLD}⚡ 请输入菜单选项代码 [0-9]: ${RESET}"
+        read -r CHOICE < /dev/tty 2>/dev/null || read -r CHOICE
+        case "$CHOICE" in
+            1) show_credentials ;;
+            2) restart_service ;;
+            3) stop_service ;;
+            4) toggle_autostart ;;
+            5) collect_parameters; download_core; setup_daemon; configure_firewall; restart_service; show_credentials ;;
+            6) view_logs ;;
+            7) test_port ;;
+            8) update_script ;;
+            9) uninstall_socks5 ;;
+            0) echo -e "\n   ${COLOR_SUC}${BOLD}✨ 会话已关闭。随时输入 ${COLOR_SUC}${BOLD}S5${RESET}${COLOR_SUC}${BOLD} 即可重新打开管理控制台！${RESET}\n"; exit 0 ;;
+            *) print_warn "无效的选项代码：请输入 0 到 9 之间的数字。"; sleep 1.2 ;;
+        esac
+    done
+}
+
+main() {
+    install_shortcut
+    check_environment_and_deps
+    if [ -f "$CONFIG_FILE" ] && [ -f "/usr/local/bin/gost" ]; then
+        menu_ui
+    else
+        collect_parameters
+        download_core
+        setup_daemon
+        configure_firewall
+        show_credentials
+        menu_ui
+    fi
+}
+
+main "$@"
