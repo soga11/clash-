@@ -1,0 +1,506 @@
+#!/bin/sh
+# =====================================================================
+# Hysteria2 安装/管理脚本 (低内存 + NAT 友好, Alpine/Debian/Ubuntu 通用)
+# 纯 POSIX sh, 不依赖 bash
+#
+#   sh hy2.sh                                   安装, 端口 52015
+#   sh hy2.sh 15300                             安装到指定端口
+#   PASSWORD='xxx' SNI='a.b.com' sh hy2.sh      覆盖密码/SNI
+#   EXT_IP=1.2.3.4 EXT_PORT=30001 sh hy2.sh     NAT: 对外地址/端口与本地不同
+#   HY2_VER=v2.6.5 sh hy2.sh                    锁定核心版本 (默认取 latest)
+#   FORCE_CORE=1 sh hy2.sh                      强制重新下载核心
+#   sh hy2.sh list                              列出已安装实例
+#   sh hy2.sh remove 52015                      卸载指定端口
+# =====================================================================
+set -eu
+
+BASE=/opt/skim-hy2
+BIN="$BASE/hy2"
+PORT_DEFAULT=52015
+PASSWORD_DEFAULT='Aq112211!'
+SNI_DEFAULT='icloud.cdn-apple.com'
+
+EXT_IP="${EXT_IP:-}"; EXT_PORT="${EXT_PORT:-}"; HY2_VER="${HY2_VER:-}"
+CERT="${CERT:-}"; KEY="${KEY:-}"; KEEP_SWAP="${KEEP_SWAP:-0}"; FORCE_CORE="${FORCE_CORE:-0}"
+
+G='\033[42;30m'; R='\033[41;97m'; Y='\033[43;30m'; B='\033[44;97m'; NC='\033[0m'
+ok()   { printf '%b%s%b\n' "$G" "$1" "$NC"; }
+warn() { printf '%b%s%b\n' "$Y" "$1" "$NC"; }
+info() { printf '%b%s%b\n' "$B" "$1" "$NC"; }
+err()  { printf '%b%s%b\n' "$R" "$1" "$NC" >&2; }
+die()  { err "$1"; exit 1; }
+
+[ "$(id -u)" = 0 ] || die '需要 root 权限运行'
+
+# ---------- init 系统 ----------
+if [ -d /run/systemd/system ]; then INIT=systemd
+elif command -v rc-update >/dev/null 2>&1; then INIT=openrc
+else INIT=none; fi
+
+# ---------- 包管理器 ----------
+if   command -v apk     >/dev/null 2>&1; then PKG=apk
+elif command -v apt-get >/dev/null 2>&1; then PKG=apt
+elif command -v dnf     >/dev/null 2>&1; then PKG=dnf
+elif command -v yum     >/dev/null 2>&1; then PKG=yum
+else PKG=none; fi
+APT_SYNCED=0
+
+pkg_install() {
+    case "$PKG" in
+        apk) apk add --no-cache --no-progress "$@" >/dev/null 2>&1 ;;
+        apt)
+            if [ "$APT_SYNCED" = 0 ]; then
+                DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+                APT_SYNCED=1
+            fi
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                --no-install-recommends "$@" >/dev/null 2>&1 ;;
+        dnf) dnf install -y -q "$@" >/dev/null 2>&1 ;;
+        yum) yum install -y -q "$@" >/dev/null 2>&1 ;;
+        *)   return 1 ;;
+    esac
+}
+
+# ---------- 低内存: 临时 swap, 装完即撤 ----------
+SWAP_TMP=''
+mem_val() { awk -v k="$1" '$1==k":"{printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null; }
+
+try_swap() {
+    a=$(mem_val MemAvailable); s=$(mem_val SwapTotal)
+    [ -n "${a:-}" ] || a=999
+    [ -n "${s:-}" ] || s=0
+    if [ "$a" -ge 180 ] || [ "$s" -gt 0 ]; then return 1; fi
+    warn "可用内存仅 ${a}MB, 临时启用 256MB swap 以完成安装"
+    f=/swapfile.hy2
+    if ! { fallocate -l 256M "$f" 2>/dev/null || \
+           dd if=/dev/zero of="$f" bs=1M count=256 2>/dev/null; }; then
+        rm -f "$f"; return 1
+    fi
+    chmod 600 "$f"
+    if ! mkswap "$f" >/dev/null 2>&1 || ! swapon "$f" 2>/dev/null; then
+        rm -f "$f"; warn '当前环境不允许启用 swap (LXC 容器常见), 跳过'; return 1
+    fi
+    SWAP_TMP="$f"; return 0
+}
+drop_swap() {
+    [ -n "$SWAP_TMP" ] || return 0
+    if [ "$KEEP_SWAP" = 1 ]; then warn "已保留 swap: $SWAP_TMP"; return 0; fi
+    swapoff "$SWAP_TMP" 2>/dev/null || true
+    rm -f "$SWAP_TMP"; SWAP_TMP=''
+}
+trap drop_swap EXIT INT TERM
+
+# ---------- 子命令 ----------
+svc_state() {
+    case "$INIT" in
+        systemd) systemctl is-active "hy2-$1" 2>/dev/null || true ;;
+        openrc)  rc-service "hy2-$1" status 2>/dev/null | sed -n 's/^ *status: *//p' || true ;;
+        *)       echo unknown ;;
+    esac
+}
+do_list() {
+    info '已安装实例:'; n=0
+    for d in "$BASE"/*/; do
+        [ -f "${d}config.yaml" ] || continue
+        p=$(basename "$d")
+        printf '  端口 %-6s 状态 %s\n' "$p" "$(svc_state "$p")"; n=1
+    done
+    [ "$n" = 1 ] || echo '  (无)'
+}
+do_remove() {
+    p="${1:-}"; [ -n "$p" ] || die '用法: sh hy2.sh remove <端口>'
+    if [ "$INIT" = systemd ]; then
+        systemctl disable --now "hy2-$p" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/hy2-$p.service"
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    if [ "$INIT" = openrc ]; then
+        rc-service "hy2-$p" stop >/dev/null 2>&1 || true
+        rc-update del "hy2-$p" default >/dev/null 2>&1 || true
+        rm -f "/etc/init.d/hy2-$p"
+    fi
+    rm -rf "$BASE/$p" "/var/log/hy2-$p.log"
+    ok "已卸载端口 $p (核心二进制保留在 $BIN)"
+}
+
+case "${1:-}" in
+    list) do_list; exit 0 ;;
+    remove|uninstall) do_remove "${2:-}"; exit 0 ;;
+esac
+
+# ---------- 参数 ----------
+PORT="${1:-$PORT_DEFAULT}"
+case "$PORT" in ''|*[!0-9]*) die "端口非法: $PORT" ;; esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "端口超范围: $PORT"
+PASSWORD="${PASSWORD:-$PASSWORD_DEFAULT}"
+SNI="${SNI:-$SNI_DEFAULT}"
+DIR="$BASE/$PORT"
+
+# ---------- 架构 (armv7 资产名原脚本写错了) ----------
+MACH=$(uname -m)
+case "$MACH" in
+    x86_64|amd64)  ASSETS='hysteria-linux-amd64' ;;
+    aarch64|arm64) ASSETS='hysteria-linux-arm64' ;;
+    armv7*)        ASSETS='hysteria-linux-armv7 hysteria-linux-arm' ;;
+    armv6*|armv5*) ASSETS='hysteria-linux-armv5 hysteria-linux-arm' ;;
+    i386|i686)     ASSETS='hysteria-linux-386' ;;
+    s390x)         ASSETS='hysteria-linux-s390x' ;;
+    riscv64)       ASSETS='hysteria-linux-riscv64' ;;
+    *) die "不支持的架构: $MACH" ;;
+esac
+
+# ---------- 按内存分档 ----------
+MEM=$(mem_val MemTotal); [ -n "${MEM:-}" ] || MEM=512
+if [ "$MEM" -lt 320 ]; then
+    Q_ISW=2097152; Q_MSW=4194304;  Q_ICW=4194304;  Q_MCW=8388608;  Q_STR=256;  GOMEM=48MiB
+elif [ "$MEM" -lt 768 ]; then
+    Q_ISW=4194304; Q_MSW=8388608;  Q_ICW=8388608;  Q_MCW=16777216; Q_STR=512;  GOMEM=96MiB
+else
+    Q_ISW=8388608; Q_MSW=16777216; Q_ICW=16777216; Q_MCW=33554432; Q_STR=1024; GOMEM=256MiB
+fi
+
+info '========================================'
+info '  Hysteria2 安装 (低内存 / NAT 友好版)'
+info '========================================'
+printf '  端口: %s   内存: %sMB   架构: %s\n' "$PORT" "$MEM" "$MACH"
+printf '  init: %s   包管理: %s   Go 内存上限: %s\n\n' "$INIT" "$PKG" "$GOMEM"
+
+[ "$INIT" != none ] && : || die '未检测到 systemd / OpenRC, 无法托管服务'
+
+# ---------- 端口占用 ----------
+if command -v ss >/dev/null 2>&1; then
+    if ss -lunH 2>/dev/null | grep -q ":$PORT "; then
+        warn "UDP $PORT 已被占用 (若是本脚本的旧实例可忽略, 将被覆盖)"
+    fi
+fi
+
+# ---------- 依赖 ----------
+for t in curl wget; do
+    if ! command -v "$t" >/dev/null 2>&1; then pkg_install "$t" || true; fi
+done
+if [ "$PKG" = apk ]; then pkg_install ca-certificates || true; fi
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 \
+    || die '缺少 curl/wget 且自动安装失败'
+
+# ---------- 停旧实例 ----------
+[ "$INIT" = systemd ] && systemctl stop "hy2-$PORT" >/dev/null 2>&1 || true
+[ "$INIT" = openrc ]  && rc-service "hy2-$PORT" stop >/dev/null 2>&1 || true
+mkdir -p "$DIR"
+
+# ---------- 下载核心 (校验 + 原子替换 + 多镜像) ----------
+fetch() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 300 \
+             -o "$2" "$1" 2>/dev/null && return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -T 15 -t 2 -O "$2" "$1" 2>/dev/null && return 0
+    fi
+    return 1
+}
+core_ok() { [ -s "$BIN" ] && [ -x "$BIN" ] && "$BIN" version >/dev/null 2>&1; }
+
+if [ -z "$HY2_VER" ] || [ "$HY2_VER" = latest ]; then REL='latest/download'
+else REL="download/app/$HY2_VER"; fi
+
+if core_ok && [ "$FORCE_CORE" != 1 ]; then
+    ok "核心已存在且可执行: $("$BIN" version 2>/dev/null | awk '/^Version/{print $2; exit}')"
+else
+    ok '下载 Hysteria2 核心...'
+    TMP="$BASE/.hy2.dl"; GOT=0
+    for a in $ASSETS; do
+        [ "$GOT" = 1 ] && break
+        for m in '' 'https://ghfast.top/' 'https://gh-proxy.com/'; do
+            u="${m}https://github.com/apernet/hysteria/releases/$REL/$a"
+            printf '  尝试 %s\n' "$u"
+            rm -f "$TMP"
+            if fetch "$u" "$TMP" && [ -s "$TMP" ]; then
+                chmod +x "$TMP"
+                # 能跑出 version 才算有效: 同时验证了完整性和架构
+                if "$TMP" version >/dev/null 2>&1; then
+                    mv -f "$TMP" "$BIN"; GOT=1; ok '  核心校验通过'; break
+                fi
+            fi
+        done
+    done
+    rm -f "$TMP"
+    [ "$GOT" = 1 ] || die '核心下载失败: 请检查出网/DNS, 或手动放置二进制到 '"$BIN"
+fi
+
+# ---------- 证书 ----------
+gen_cert() {
+    if ! command -v openssl >/dev/null 2>&1; then
+        warn '未找到 openssl, 尝试安装...'
+        if ! pkg_install openssl; then
+            try_swap || true
+            pkg_install openssl || true
+            drop_swap
+        fi
+    fi
+    command -v openssl >/dev/null 2>&1 || return 1
+    cat > "$DIR/openssl.cnf" <<EOF
+[req]
+prompt             = no
+default_md         = sha256
+distinguished_name = dn
+x509_extensions    = ext
+[dn]
+CN = ${SNI}
+[ext]
+basicConstraints = critical,CA:FALSE
+keyUsage         = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName   = @san
+[san]
+DNS.1 = ${SNI}
+DNS.2 = *.${SNI}
+EOF
+    # ECDSA P-256: 握手比 RSA2048 省 CPU 和内存, 低配机首选
+    openssl req -x509 -new -nodes -days 36500 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+        -keyout "$DIR/server.key" -out "$DIR/server.crt" \
+        -config "$DIR/openssl.cnf" >/dev/null 2>&1 \
+    || openssl req -x509 -new -nodes -days 36500 -newkey rsa:2048 \
+        -keyout "$DIR/server.key" -out "$DIR/server.crt" \
+        -config "$DIR/openssl.cnf" >/dev/null 2>&1 \
+    || return 1
+    [ -s "$DIR/server.crt" ] && [ -s "$DIR/server.key" ]
+}
+
+ok '准备 TLS 证书...'
+if [ -n "$CERT" ] && [ -n "$KEY" ]; then
+    cp -f "$CERT" "$DIR/server.crt"; cp -f "$KEY" "$DIR/server.key"
+    ok '  使用外部指定证书'
+elif [ -s "$DIR/server.crt" ] && [ -s "$DIR/server.key" ]; then
+    ok '  复用本端口已有证书'
+else
+    for c in "$BASE"/*/server.crt; do
+        if [ -s "$c" ] && [ -s "${c%.crt}.key" ]; then
+            cp -f "$c" "$DIR/server.crt"; cp -f "${c%.crt}.key" "$DIR/server.key"
+            ok "  复用同机已有证书 ($c), 免装 openssl"; break
+        fi
+    done
+fi
+if [ ! -s "$DIR/server.crt" ] || [ ! -s "$DIR/server.key" ]; then
+    gen_cert || die "证书生成失败: openssl 不可用。低内存机器可先执行 (Alpine) apk add openssl / (Debian) apt-get install -y openssl 后重跑, 或用 CERT=/path.crt KEY=/path.key 指定现成证书"
+fi
+chmod 600 "$DIR/server.key"; chmod 644 "$DIR/server.crt"
+
+# ---------- 配置 ----------
+yaml_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+ok '写入配置...'
+cat > "$DIR/config.yaml" <<EOF
+listen: :${PORT}
+
+tls:
+  cert: ${DIR}/server.crt
+  key: ${DIR}/server.key
+
+auth:
+  type: password
+  password: "$(yaml_esc "$PASSWORD")"
+
+# 按本机内存(${MEM}MB)分档, 避免小内存机被 QUIC 缓冲打爆
+quic:
+  initStreamReceiveWindow: ${Q_ISW}
+  maxStreamReceiveWindow: ${Q_MSW}
+  initConnReceiveWindow: ${Q_ICW}
+  maxConnReceiveWindow: ${Q_MCW}
+  maxIdleTimeout: 30s
+  maxIncomingStreams: ${Q_STR}
+
+disableUDP: false
+udpIdleTimeout: 30s
+speedTest: false
+
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.apple.com
+    rewriteHost: true
+EOF
+
+# ---------- QUIC 内核缓冲 (容器内失败属正常) ----------
+if [ -d /etc/sysctl.d ]; then
+    printf 'net.core.rmem_max=16777216\nnet.core.wmem_max=16777216\n' \
+        > /etc/sysctl.d/99-hysteria.conf 2>/dev/null || true
+fi
+sysctl -w net.core.rmem_max=16777216 >/dev/null 2>&1 || true
+sysctl -w net.core.wmem_max=16777216 >/dev/null 2>&1 || true
+
+# ---------- 本机防火墙 ----------
+if command -v ufw >/dev/null 2>&1; then ufw allow "$PORT"/udp >/dev/null 2>&1 || true; fi
+if command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port="$PORT"/udp >/dev/null 2>&1 || true
+    firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+
+# ---------- 服务 ----------
+ok '注册服务...'
+if [ "$INIT" = systemd ]; then
+    cat > "/etc/systemd/system/hy2-$PORT.service" <<EOF
+[Unit]
+Description=Hysteria2 Server (port ${PORT})
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=${DIR}
+Environment=HYSTERIA_LOG_LEVEL=warn
+Environment=GOMEMLIMIT=${GOMEM}
+Environment=GOGC=50
+ExecStart=${BIN} server -c ${DIR}/config.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+OOMScoreAdjust=-100
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable "hy2-$PORT" >/dev/null 2>&1
+    systemctl restart "hy2-$PORT"
+else
+    if [ -x /sbin/supervise-daemon ] || [ -x /usr/sbin/supervise-daemon ]; then
+        SUP="supervisor=supervise-daemon
+respawn_delay=5
+respawn_max=0
+supervise_daemon_args=\"--stdout /var/log/hy2-$PORT.log --stderr /var/log/hy2-$PORT.log\""
+    else
+        SUP="command_background=true
+output_log=\"/var/log/hy2-$PORT.log\"
+error_log=\"/var/log/hy2-$PORT.log\""
+    fi
+    cat > "/etc/init.d/hy2-$PORT" <<EOF
+#!/sbin/openrc-run
+
+name="hy2-${PORT}"
+description="Hysteria2 Server (port ${PORT})"
+command="${BIN}"
+command_args="server -c ${DIR}/config.yaml"
+directory="${DIR}"
+pidfile="/run/hy2-${PORT}.pid"
+${SUP}
+
+export HYSTERIA_LOG_LEVEL=warn
+export GOMEMLIMIT=${GOMEM}
+export GOGC=50
+
+depend() {
+    after net firewall
+}
+EOF
+    chmod +x "/etc/init.d/hy2-$PORT"
+    rc-update add "hy2-$PORT" default >/dev/null 2>&1 || true
+    rc-service "hy2-$PORT" restart >/dev/null 2>&1 || true
+fi
+
+# ---------- 健康检查 (进程为准, 跨 init 一致) ----------
+proc_alive() { pgrep -f "server -c $DIR/config.yaml" >/dev/null 2>&1; }
+i=0; UP=0
+while [ "$i" -lt 8 ]; do
+    if proc_alive; then UP=1; else UP=0; fi
+    i=$((i+1)); sleep 1
+done
+if [ "$UP" != 1 ]; then
+    err '服务未能保持运行, 最近日志:'
+    if [ "$INIT" = systemd ]; then
+        journalctl -u "hy2-$PORT" -n 30 --no-pager 2>/dev/null || true
+    else
+        tail -n 30 "/var/log/hy2-$PORT.log" 2>/dev/null || true
+    fi
+    echo "手动前台调试: $BIN server -c $DIR/config.yaml"
+    exit 1
+fi
+ok '✅ 服务运行中'
+
+# ---------- 出口信息 ----------
+is_ip() {
+    [ -n "${1:-}" ] || return 1
+    case "$1" in *[!0-9a-fA-F:.]*) return 1 ;; esac
+    [ "${#1}" -ge 7 ] || return 1
+    return 0
+}
+get_ip() {
+    for u in https://api.ipify.org https://icanhazip.com https://ifconfig.me/ip; do
+        v=$(curl "$1" -fsS --max-time 6 "$u" 2>/dev/null | tr -d '[:space:]') || v=''
+        if is_ip "$v"; then printf '%s' "$v"; return 0; fi
+    done
+    return 1
+}
+PUBIP="$EXT_IP"
+if [ -z "$PUBIP" ]; then PUBIP=$(get_ip -4 || true); fi
+if [ -z "$PUBIP" ]; then PUBIP=$(get_ip -6 || true); fi
+if [ -z "$PUBIP" ]; then PUBIP='<你的服务器IP>'; warn '公网 IP 自动检测失败, 请手动替换链接中的地址'; fi
+ADDR="$PUBIP"; SPORT="${EXT_PORT:-$PORT}"
+case "$ADDR" in *:*) UHOST="[$ADDR]" ;; *) UHOST="$ADDR" ;; esac
+
+PIN=''
+if command -v openssl >/dev/null 2>&1; then
+    PIN=$(openssl x509 -noout -fingerprint -sha256 -in "$DIR/server.crt" 2>/dev/null \
+          | cut -d= -f2 || true)
+fi
+PWENC=$(LC_ALL=C awk 'BEGIN{
+  for(n=0;n<256;n++) o[sprintf("%c",n)]=n
+  s=ARGV[1]
+  for(i=1;i<=length(s);i++){c=substr(s,i,1)
+    if(c ~ /^[A-Za-z0-9._~-]$/) printf "%s",c; else printf "%%%02X",o[c]}
+}' "$PASSWORD")
+
+echo; info '========================================'
+info '  ✅ 安装完成'; info '========================================'
+printf '  地址: %s\n  端口: %s\n  密码: %s\n  SNI : %s\n' "$ADDR" "$SPORT" "$PASSWORD" "$SNI"
+[ -n "$PIN" ] && printf '  证书指纹: %s\n' "$PIN"
+echo
+ok 'v2rayN / 通用链接:'
+if [ -n "$PIN" ]; then
+    echo "hy2://${PWENC}@${UHOST}:${SPORT}/?insecure=1&sni=${SNI}&pinSHA256=${PIN}#HY2-${SPORT}"
+else
+    echo "hy2://${PWENC}@${UHOST}:${SPORT}/?insecure=1&sni=${SNI}#HY2-${SPORT}"
+fi
+echo
+ok 'Sing-box:'
+cat <<EOF
+{
+  "type": "hysteria2",
+  "tag": "HY2-${SPORT}",
+  "server": "${ADDR}",
+  "server_port": ${SPORT},
+  "password": "${PASSWORD}",
+  "tls": { "enabled": true, "server_name": "${SNI}", "insecure": true, "alpn": ["h3"] }
+}
+EOF
+echo
+ok 'Clash Meta:'
+cat <<EOF
+- name: HY2-${SPORT}
+  type: hysteria2
+  server: ${ADDR}
+  port: ${SPORT}
+  password: ${PASSWORD}
+  sni: ${SNI}
+  skip-cert-verify: true
+  alpn: [h3]
+EOF
+echo
+warn '管理命令:'
+if [ "$INIT" = systemd ]; then
+    echo "  状态 systemctl status hy2-$PORT"
+    echo "  日志 journalctl -u hy2-$PORT -f"
+    echo "  重启 systemctl restart hy2-$PORT"
+else
+    echo "  状态 rc-service hy2-$PORT status"
+    echo "  日志 tail -f /var/log/hy2-$PORT.log"
+    echo "  重启 rc-service hy2-$PORT restart"
+fi
+echo "  列表 sh $0 list"
+echo "  卸载 sh $0 remove $PORT"
+echo
+warn "NAT 机器请确认: ① $PORT 在你被分配的端口段内 ② 面板已把 UDP $PORT 转发到本机 ③ 若对外端口不同, 用 EXT_PORT=对外端口 重跑本脚本以生成正确链接"
+info '========================================'
