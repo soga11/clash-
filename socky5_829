@@ -1,0 +1,354 @@
+#!/bin/sh
+# SOCKS5 (gost) 一键部署 — 非交互, 固定端口/账号/密码, Alpine/Debian/Ubuntu/RHEL 通用
+#   sh s5.sh                    安装/重装 (幂等)
+#   S5_PORT=40443 S5_USER=soga S5_PASS=sogasoga sh s5.sh
+#   sh s5.sh info | status | restart | stop | upgrade | remove
+set -eu
+
+PORT_DEFAULT=40443; USER_DEFAULT=soga; PASS_DEFAULT=sogasoga
+GOST_VER=2.11.5
+CONF_DIR=/etc/gost; CONF="$CONF_DIR/s5.conf"; JSON="$CONF_DIR/config.json"
+BIN=/usr/local/bin/gost; CTL=/usr/local/bin/s5ctl; SHORT=/usr/local/bin/S5
+SVC=socks5
+
+G='\033[42;30m'; R='\033[41;97m'; Y='\033[43;30m'; B='\033[44;97m'; NC='\033[0m'
+ok()   { printf '%b%s%b\n' "$G" "$1" "$NC"; }
+warn() { printf '%b%s%b\n' "$Y" "$1" "$NC"; }
+info() { printf '%b%s%b\n' "$B" "$1" "$NC"; }
+err()  { printf '%b%s%b\n' "$R" "$1" "$NC" >&2; }
+die()  { err "$1"; exit 1; }
+[ "$(id -u)" = 0 ] || die '需要 root 权限运行'
+
+if [ -d /run/systemd/system ]; then INIT=systemd
+elif command -v rc-update >/dev/null 2>&1; then INIT=openrc
+else INIT=none; fi
+if   command -v apk     >/dev/null 2>&1; then PKG=apk
+elif command -v apt-get >/dev/null 2>&1; then PKG=apt
+elif command -v dnf     >/dev/null 2>&1; then PKG=dnf
+elif command -v yum     >/dev/null 2>&1; then PKG=yum
+else PKG=none; fi
+APT_SYNCED=0
+pkg_install() {
+    case "$PKG" in
+        apk) apk add --no-cache --no-progress "$@" >/dev/null 2>&1 ;;
+        apt) if [ "$APT_SYNCED" = 0 ]; then
+                 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+                 APT_SYNCED=1; fi
+             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                 --no-install-recommends "$@" >/dev/null 2>&1 ;;
+        dnf) dnf install -y -q "$@" >/dev/null 2>&1 ;;
+        yum) yum install -y -q "$@" >/dev/null 2>&1 ;;
+        *)   return 1 ;;
+    esac
+}
+load_conf() { if [ -f "$CONF" ]; then . "$CONF"; return 0; fi; return 1; }
+
+listening() {
+    p="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | grep -qE "[:.]${p}([[:space:]]|$)" && return 0
+    fi
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -ltn 2>/dev/null | grep -qE "[:.]${p}([[:space:]]|$)" && return 0
+    fi
+    pgrep -f "gost -C $JSON" >/dev/null 2>&1
+}
+svc_do() {
+    case "$INIT" in
+        systemd) systemctl "$1" "$SVC" >/dev/null 2>&1 || true ;;
+        openrc)  rc-service "$SVC" "$1" >/dev/null 2>&1 || true ;;
+    esac
+}
+show_info() {
+    load_conf || die '未找到配置, 请先安装'
+    info '========================================'
+    info '  SOCKS5 节点信息'
+    info '========================================'
+    if listening "$SPORT"; then S='运行中'; else S='已停止'; fi
+    printf '  状态 %s\n  端口 %s\n  账号 %s\n  密码 %s\n' "$S" "$SPORT" "$SUSER" "$SPASS"
+    [ -n "${SIP4:-}" ] && printf '  IPv4 %s\n' "$SIP4"
+    [ -n "${SIP6:-}" ] && printf '  IPv6 %s\n' "$SIP6"
+    echo; ok '连接链接:'
+    [ -n "${SIP4:-}" ] && echo "socks5://${SUSER}:${SPASS}@${SIP4}:${SPORT}"
+    [ -n "${SIP6:-}" ] && echo "socks5://${SUSER}:${SPASS}@[${SIP6}]:${SPORT}"
+    echo; info '========================================'
+}
+do_remove() {
+    load_conf || true
+    svc_do stop
+    if [ "$INIT" = systemd ]; then
+        systemctl disable "$SVC" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/$SVC.service"; systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    if [ "$INIT" = openrc ]; then
+        rc-update del "$SVC" default >/dev/null 2>&1 || true; rm -f "/etc/init.d/$SVC"
+    fi
+    if [ -n "${SPORT:-}" ] && command -v iptables >/dev/null 2>&1; then
+        for pr in tcp udp; do
+            while iptables -C INPUT -p "$pr" --dport "$SPORT" -j ACCEPT 2>/dev/null; do
+                iptables -D INPUT -p "$pr" --dport "$SPORT" -j ACCEPT 2>/dev/null || break
+            done
+        done
+    fi
+    rm -f "$BIN" "$SHORT" "$CTL"; rm -rf "$CONF_DIR"
+    ok 'SOCKS5 已彻底卸载'
+}
+case "${1:-}" in
+    info|show)  show_info; exit 0 ;;
+    status)     load_conf || die '未安装'
+                if listening "$SPORT"; then ok "运行中 (端口 $SPORT)"; else err '已停止'; exit 1; fi; exit 0 ;;
+    restart)    svc_do restart; sleep 2; load_conf
+                if listening "$SPORT"; then ok '已重启'; else die '重启后未监听'; fi; exit 0 ;;
+    stop)       svc_do stop; ok '已停止'; exit 0 ;;
+    remove|uninstall) do_remove; exit 0 ;;
+    upgrade)    FORCE=1; shift ;;
+esac
+FORCE="${FORCE:-0}"
+
+SPORT="${S5_PORT:-$PORT_DEFAULT}"
+SUSER="${S5_USER:-$USER_DEFAULT}"
+SPASS="${S5_PASS:-$PASS_DEFAULT}"
+case "$SPORT" in ''|*[!0-9]*) die "端口非法: $SPORT" ;; esac
+[ "$SPORT" -ge 1 ] && [ "$SPORT" -le 65535 ] || die "端口超范围: $SPORT"
+case "$SUSER$SPASS" in *[:@/?\#]*) die '账号密码不能含 : @ / ? # (会破坏 gost 监听串解析)' ;; esac
+if [ "$INIT" = none ]; then die '未检测到 systemd / OpenRC, 无法托管服务'; fi
+
+MEM=$(awk '/^MemTotal:/{printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null || echo 512)
+[ -n "$MEM" ] || MEM=512
+if   [ "$MEM" -le 96  ]; then GOGC=50;  GOMEM=32MiB; NOFILE=16384
+elif [ "$MEM" -le 192 ]; then GOGC=50;  GOMEM=64MiB; NOFILE=32768
+elif [ "$MEM" -le 768 ]; then GOGC=100; g=$((MEM/3)); GOMEM="${g}MiB"; NOFILE=65536
+else GOGC=100; g=$((MEM*3/5)); GOMEM="${g}MiB"; NOFILE=65536; fi
+
+MACH=$(uname -m)
+case "$MACH" in
+    x86_64|amd64)  ASSET="gost-linux-amd64-${GOST_VER}.gz" ;;
+    aarch64|arm64) ASSET="gost-linux-armv8-${GOST_VER}.gz" ;;
+    armv7*)        ASSET="gost-linux-armv7-${GOST_VER}.gz" ;;
+    armv6*)        ASSET="gost-linux-armv6-${GOST_VER}.gz" ;;
+    i386|i686)     ASSET="gost-linux-386-${GOST_VER}.gz" ;;
+    *) die "不支持的架构: $MACH" ;;
+esac
+
+info '========================================'
+info '  SOCKS5 (gost) 一键部署'
+info '========================================'
+printf '  端口 %s  账号 %s  内存 %sMB  架构 %s  init %s\n\n' \
+       "$SPORT" "$SUSER" "$MEM" "$MACH" "$INIT"
+
+for t in curl gzip; do
+    if ! command -v "$t" >/dev/null 2>&1; then pkg_install "$t" || true; fi
+done
+if [ "$PKG" = apk ]; then pkg_install ca-certificates >/dev/null 2>&1 || true; fi
+command -v curl >/dev/null 2>&1 || die '缺少 curl 且自动安装失败'
+command -v gzip >/dev/null 2>&1 || die '缺少 gzip 且自动安装失败'
+
+bin_ok() {
+    [ -s "$1" ] && [ -x "$1" ] || return 1
+    "$1" -V >/dev/null 2>&1 && return 0
+    head -c 4 "$1" 2>/dev/null | grep -q ELF
+}
+mkdir -p "$CONF_DIR"; chmod 700 "$CONF_DIR"
+if bin_ok "$BIN" && [ "$FORCE" != 1 ]; then
+    ok "gost 已存在: $("$BIN" -V 2>&1 | head -n1)"
+else
+    ok '下载 gost 核心...'
+    RAW="https://github.com/ginuerzh/gost/releases/download/v${GOST_VER}/${ASSET}"
+    GOT=0
+    for u in "$RAW" "https://ghfast.top/$RAW" "https://gh-proxy.com/$RAW"; do
+        printf '  尝试 %s\n' "$u"
+        rm -f /tmp/gost.gz /tmp/gost
+        if curl -fsSL --retry 2 --connect-timeout 10 --max-time 180 -o /tmp/gost.gz "$u" \
+           && [ -s /tmp/gost.gz ] && gzip -dc /tmp/gost.gz > /tmp/gost 2>/dev/null; then
+            chmod +x /tmp/gost
+            if bin_ok /tmp/gost; then mv -f /tmp/gost "$BIN"; GOT=1; ok '  校验通过'; break; fi
+        fi
+    done
+    rm -f /tmp/gost.gz /tmp/gost
+    [ "$GOT" = 1 ] || die "下载失败: 检查出网/DNS, 或手动放二进制到 $BIN"
+fi
+
+svc_do stop
+json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+cat > "$JSON" <<EOF
+{
+  "Debug": false,
+  "Retries": 0,
+  "ServeNodes": [
+    "socks5://$(json_esc "$SUSER"):$(json_esc "$SPASS")@:${SPORT}"
+  ]
+}
+EOF
+chmod 600 "$JSON"
+cat > "$CONF" <<EOF
+SPORT="${SPORT}"
+SUSER="${SUSER}"
+SPASS="${SPASS}"
+EOF
+chmod 600 "$CONF"
+
+# 预检: 确认 gost 能吃这份配置文件, 不行则退回命令行参数模式
+MODE=conf
+"$BIN" -C "$JSON" >/tmp/gost.pre 2>&1 &
+PRE=$!
+sleep 2
+if kill -0 "$PRE" 2>/dev/null; then kill "$PRE" 2>/dev/null || true
+else MODE=argv; warn '配置文件模式启动失败, 退回命令行模式 (密码会出现在 ps 输出中)'
+     sed -n '1,5p' /tmp/gost.pre 2>/dev/null || true; fi
+wait "$PRE" 2>/dev/null || true
+rm -f /tmp/gost.pre
+sleep 1
+if [ "$MODE" = conf ]; then EXECARGS="-C $JSON"
+else EXECARGS="-L socks5://${SUSER}:${SPASS}@:${SPORT}"; fi
+
+ok '注册服务...'
+if [ "$INIT" = systemd ]; then
+    cat > "/etc/systemd/system/$SVC.service" <<EOF
+[Unit]
+Description=Gost SOCKS5 Proxy (port ${SPORT})
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=GOGC=${GOGC}
+Environment=GOMEMLIMIT=${GOMEM}
+ExecStart=${BIN} ${EXECARGS}
+Restart=always
+RestartSec=3
+LimitNOFILE=${NOFILE}
+OOMScoreAdjust=-100
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable "$SVC" >/dev/null 2>&1
+    systemctl restart "$SVC"
+else
+    if [ -x /sbin/supervise-daemon ] || [ -x /usr/sbin/supervise-daemon ]; then
+        SUP="supervisor=supervise-daemon
+respawn_delay=3
+respawn_max=0
+supervise_daemon_args=\"--stdout /var/log/$SVC.log --stderr /var/log/$SVC.log\""
+    else
+        SUP="command_background=true
+output_log=\"/var/log/$SVC.log\"
+error_log=\"/var/log/$SVC.log\""
+    fi
+    cat > "/etc/init.d/$SVC" <<EOF
+#!/sbin/openrc-run
+name="$SVC"
+description="Gost SOCKS5 Proxy (port ${SPORT})"
+command="${BIN}"
+command_args="${EXECARGS}"
+pidfile="/run/$SVC.pid"
+${SUP}
+
+export GOGC=${GOGC}
+export GOMEMLIMIT=${GOMEM}
+
+depend() {
+    after net firewall
+}
+EOF
+    chmod +x "/etc/init.d/$SVC"
+    rc-update add "$SVC" default >/dev/null 2>&1 || true
+    rc-service "$SVC" restart >/dev/null 2>&1 || true
+fi
+
+# 防火墙: 先查再插, 避免重复规则堆积
+fw_add() {
+    pr="$1"
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -C INPUT -p "$pr" --dport "$SPORT" -j ACCEPT 2>/dev/null \
+            || iptables -I INPUT -p "$pr" --dport "$SPORT" -j ACCEPT 2>/dev/null || true
+    fi
+    if command -v ip6tables >/dev/null 2>&1; then
+        ip6tables -C INPUT -p "$pr" --dport "$SPORT" -j ACCEPT 2>/dev/null \
+            || ip6tables -I INPUT -p "$pr" --dport "$SPORT" -j ACCEPT 2>/dev/null || true
+    fi
+    if command -v ufw >/dev/null 2>&1; then ufw allow "$SPORT/$pr" >/dev/null 2>&1 || true; fi
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        firewall-cmd --permanent --add-port="$SPORT/$pr" >/dev/null 2>&1 || true
+    fi
+}
+fw_add tcp; fw_add udp
+command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 || true
+
+UP=0; i=0
+while [ "$i" -lt 8 ]; do
+    if listening "$SPORT"; then UP=1; break; fi
+    i=$((i+1)); sleep 1
+done
+if [ "$UP" != 1 ]; then
+    err '服务未监听, 最近日志:'
+    if [ "$INIT" = systemd ]; then journalctl -u "$SVC" -n 25 --no-pager 2>/dev/null || true
+    else tail -n 25 "/var/log/$SVC.log" 2>/dev/null || true; fi
+    echo "手动前台调试: $BIN $EXECARGS"; exit 1
+fi
+ok '✅ 服务运行中'
+
+# 本地真实握手测试 (含认证)
+if command -v curl >/dev/null 2>&1; then
+    T=$(curl -s --max-time 8 --socks5 "${SUSER}:${SPASS}@127.0.0.1:${SPORT}" \
+        https://api.ipify.org 2>/dev/null || true)
+    if [ -n "$T" ]; then ok "隧道自测通过, 出口 IP: $T"
+    else warn '隧道自测未通过 (端口在听但代理未成功转发), 检查机器出网'; fi
+fi
+
+is_ip() { case "${1:-}" in ''|*[!0-9a-fA-F:.]*) return 1 ;; esac; [ "${#1}" -ge 7 ]; }
+has_addr() {
+    command -v ip >/dev/null 2>&1 || return 0
+    if [ "$1" = 6 ]; then ip -6 addr show scope global 2>/dev/null | grep -q inet6
+    else ip -4 addr show scope global 2>/dev/null | grep -q inet; fi
+}
+get_ip() {
+    f="$1"; shift
+    for u in "$@"; do
+        v=$(curl "$f" -fsS --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]') || v=''
+        is_ip "$v" || continue
+        case "$f:$v" in
+            -4:*:*) continue ;; -6:*:*) printf '%s' "$v"; return 0 ;;
+            -6:*) continue ;; *) printf '%s' "$v"; return 0 ;;
+        esac
+    done
+    return 1
+}
+SIP4=''; SIP6=''
+if [ -n "${S5_IP:-}" ]; then
+    case "$S5_IP" in *:*) SIP6="$S5_IP" ;; *) SIP4="$S5_IP" ;; esac
+else
+    if has_addr 4; then SIP4=$(get_ip -4 https://api.ipify.org https://ipv4.icanhazip.com \
+        https://ifconfig.me/ip || true); fi
+    if has_addr 6; then SIP6=$(get_ip -6 https://api64.ipify.org https://ipv6.icanhazip.com \
+        https://v6.ident.me || true); fi
+fi
+cat >> "$CONF" <<EOF
+SIP4="${SIP4}"
+SIP6="${SIP6}"
+EOF
+
+# 本地快捷命令 (不联网, 不执行任何远程代码)
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+if [ -f "$SELF" ] && [ "$SELF" != "$CTL" ]; then
+    cp -f "$SELF" "$CTL" 2>/dev/null && chmod 755 "$CTL" || true
+fi
+if [ -x "$CTL" ]; then
+    printf '#!/bin/sh\nexec %s info "$@"\n' "$CTL" > "$SHORT"
+    chmod 755 "$SHORT"
+fi
+
+echo; show_info
+warn '管理命令:'
+echo "  查看信息 S5            (等同 s5ctl info)"
+echo "  状态     s5ctl status"
+echo "  重启     s5ctl restart      停止 s5ctl stop"
+echo "  升级核心 s5ctl upgrade      卸载 s5ctl remove"
+if [ "$INIT" = systemd ]; then echo "  日志     journalctl -u $SVC -f"
+else echo "  日志     tail -f /var/log/$SVC.log"; fi
+warn "NAT 机器: 确认 $SPORT 在分配的端口段内且面板已转发 TCP; 对外 IP 不同用 S5_IP= 重跑"
