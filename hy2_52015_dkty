@@ -1,0 +1,656 @@
+#!/bin/sh
+# Hysteria2 安装/管理脚本 — 64MB NAT ~ 1G口全档位, Alpine/Debian/Ubuntu 通用
+#   sh hy2.sh                 安装, 端口 52015        sh hy2.sh 15300   指定端口
+#   TIER=auto|64m|128m|512m|1g|nolimit                档位, 默认按内存自动
+#   WIN_STREAM_MB=48 WIN_CONN_MB=96                   手动覆盖窗口(MB)
+#   PASSWORD='xxx' SNI='a.b.com'                      覆盖密码/SNI
+#   MASQ=proxy|string   SPEEDTEST=1                   伪装模式 / 开内置测速
+#   EXT_IP=1.2.3.4 EXT_PORT=30001                     NAT 对外地址与端口
+#   HOP_RANGE=54100-54200                              跳跃端口范围, 默认 54100-54200
+#   HY2_VER=v2.6.5   FORCE_CORE=1   CERT=/a.crt KEY=/a.key
+#   sh hy2.sh list | upgrade | remove 52015 | hop | hop remove
+set -eu
+
+BASE=/opt/skim-hy2; BIN="$BASE/hy2"
+PORT_DEFAULT=52015; PASSWORD_DEFAULT='Aq112211!'; SNI_DEFAULT='icloud.cdn-apple.com'
+EXT_IP="${EXT_IP:-}"; EXT_PORT="${EXT_PORT:-}"; HY2_VER="${HY2_VER:-}"
+CERT="${CERT:-}"; KEY="${KEY:-}"; KEEP_SWAP="${KEEP_SWAP:-0}"
+FORCE_CORE="${FORCE_CORE:-0}"; UPGRADE_ALL="${UPGRADE_ALL:-0}"
+TIER_ENV="${TIER:-auto}"; SPEEDTEST="${SPEEDTEST:-0}"; MASQ_ENV="${MASQ:-}"
+WIN_STREAM_MB="${WIN_STREAM_MB:-}"; WIN_CONN_MB="${WIN_CONN_MB:-}"
+HOP_RANGE="${HOP_RANGE:-54100-54200}"  # ← 新增: 跳跃端口范围
+
+G='\033[42;30m'; R='\033[41;97m'; Y='\033[43;30m'; B='\033[44;97m'; NC='\033[0m'
+ok()   { printf '%b%s%b\n' "$G" "$1" "$NC"; }
+warn() { printf '%b%s%b\n' "$Y" "$1" "$NC"; }
+info() { printf '%b%s%b\n' "$B" "$1" "$NC"; }
+err()  { printf '%b%s%b\n' "$R" "$1" "$NC" >&2; }
+die()  { err "$1"; exit 1; }
+[ "$(id -u)" = 0 ] || die '需要 root 权限运行'
+
+if [ -d /run/systemd/system ]; then INIT=systemd
+elif command -v rc-update >/dev/null 2>&1; then INIT=openrc
+else INIT=none; fi
+
+if   command -v apk     >/dev/null 2>&1; then PKG=apk
+elif command -v apt-get >/dev/null 2>&1; then PKG=apt
+elif command -v dnf     >/dev/null 2>&1; then PKG=dnf
+elif command -v yum     >/dev/null 2>&1; then PKG=yum
+else PKG=none; fi
+APT_SYNCED=0
+pkg_install() {
+    case "$PKG" in
+        apk) apk add --no-cache --no-progress "$@" >/dev/null 2>&1 ;;
+        apt) if [ "$APT_SYNCED" = 0 ]; then
+                 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+                 APT_SYNCED=1; fi
+             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                 --no-install-recommends "$@" >/dev/null 2>&1 ;;
+        dnf) dnf install -y -q "$@" >/dev/null 2>&1 ;;
+        yum) yum install -y -q "$@" >/dev/null 2>&1 ;;
+        *)   return 1 ;;
+    esac
+}
+
+# 低内存机装 openssl 常被 OOM 杀: 临时挂 swap, 用完即撤
+SWAP_TMP=''
+mem_val() { awk -v k="$1" '$1==k":"{printf "%d", $2/1024; exit}' /proc/meminfo 2>/dev/null; }
+try_swap() {
+    a=$(mem_val MemAvailable); s=$(mem_val SwapTotal)
+    [ -n "${a:-}" ] || a=999; [ -n "${s:-}" ] || s=0
+    if [ "$a" -ge 180 ] || [ "$s" -gt 0 ]; then return 1; fi
+    warn "可用内存仅 ${a}MB, 临时启用 256MB swap"
+    f=/swapfile.hy2
+    if ! { fallocate -l 256M "$f" 2>/dev/null || \
+           dd if=/dev/zero of="$f" bs=1M count=256 2>/dev/null; }; then
+        rm -f "$f"; return 1; fi
+    chmod 600 "$f"
+    if ! mkswap "$f" >/dev/null 2>&1 || ! swapon "$f" 2>/dev/null; then
+        rm -f "$f"; warn '本环境不允许启用 swap (LXC 常见), 跳过'; return 1; fi
+    SWAP_TMP="$f"
+}
+drop_swap() {
+    [ -n "$SWAP_TMP" ] || return 0
+    if [ "$KEEP_SWAP" = 1 ]; then warn "保留 swap: $SWAP_TMP"; return 0; fi
+    swapoff "$SWAP_TMP" 2>/dev/null || true; rm -f "$SWAP_TMP"; SWAP_TMP=''
+}
+trap drop_swap EXIT INT TERM
+
+# ← 新增: 获取默认网卡
+get_nic() {
+    NIC=$(ip route show default 2>/dev/null | awk '{print $5}')
+    [ -n "$NIC" ] || NIC=eth0
+}
+
+# ← 新增: 解析跳跃范围
+parse_hop() {
+    HOP_START="${HOP_RANGE%%-*}"
+    HOP_END="${HOP_RANGE##*-}"
+    case "$HOP_START" in ''|*[!0-9]*) die "跳跃起始端口非法: $HOP_START" ;; esac
+    case "$HOP_END" in ''|*[!0-9]*) die "跳跃结束端口非法: $HOP_END" ;; esac
+}
+
+# ← 新增: 配置跳跃端口
+configure_hop() {
+    local port="$1"
+    parse_hop
+    get_nic
+
+    # 清理旧规则
+    iptables -t nat -S PREROUTING 2>/dev/null | grep "dport $HOP_START:$HOP_END" | while read -r line; do
+        iptables -t nat $(echo "$line" | sed 's/-A/-D/')
+    done 2>/dev/null || true
+    ip6tables -t nat -S PREROUTING 2>/dev/null | grep "dport $HOP_START:$HOP_END" | while read -r line; do
+        ip6tables -t nat $(echo "$line" | sed 's/-A/-D/')
+    done 2>/dev/null || true
+
+    # 添加 DNAT 规则
+    iptables -t nat -A PREROUTING -i "$NIC" -p udp --dport "$HOP_START":"$HOP_END" -j DNAT --to-destination :"$port" || true
+    ip6tables -t nat -A PREROUTING -i "$NIC" -p udp --dport "$HOP_START":"$HOP_END" -j DNAT --to-destination :"$port" || true
+
+    # 开启转发
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1 || true
+
+    # 持久化
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save 2>/dev/null || true
+    fi
+
+    ok "跳跃端口: $HOP_START-$HOP_END -> $port (网卡 $NIC)"
+}
+
+# ← 新增: 移除跳跃端口
+remove_hop() {
+    local port="$1"
+    parse_hop
+    get_nic
+
+    iptables -t nat -S PREROUTING 2>/dev/null | grep "dport $HOP_START:$HOP_END" | while read -r line; do
+        iptables -t nat $(echo "$line" | sed 's/-A/-D/')
+    done 2>/dev/null || true
+    ip6tables -t nat -S PREROUTING 2>/dev/null | grep "dport $HOP_START:$HOP_END" | while read -r line; do
+        ip6tables -t nat $(echo "$line" | sed 's/-A/-D/')
+    done 2>/dev/null || true
+
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save 2>/dev/null || true
+    fi
+
+    ok "已移除跳跃端口 $HOP_START-$HOP_END -> $port"
+}
+
+# ← 新增: 显示跳跃端口状态
+show_hop() {
+    info '跳跃端口 DNAT 规则:'
+    iptables -t nat -L PREROUTING -n 2>/dev/null | grep -E "DNAT.*udp.*dpts:" || echo '  (无 IPv4 规则)'
+    ip6tables -t nat -L PREROUTING -n 2>/dev/null | grep -E "DNAT.*udp.*dpts:" || echo '  (无 IPv6 规则)'
+    echo
+    sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding 2>/dev/null || true
+}
+
+svc_state() {
+    case "$INIT" in
+        systemd) systemctl is-active "hy2-$1" 2>/dev/null || true ;;
+        openrc)  rc-service "hy2-$1" status 2>/dev/null | sed -n 's/^ *status: *//p' || true ;;
+        *) echo unknown ;;
+    esac
+}
+do_list() {
+    info '已安装实例:'; n=0
+    for d in "$BASE"/*/; do
+        [ -f "${d}config.yaml" ] || continue
+        p=$(basename "$d"); printf '  端口 %-6s 状态 %s\n' "$p" "$(svc_state "$p")"; n=1
+    done
+    if [ "$n" != 1 ]; then echo '  (无)'; fi
+    if [ -s "$BIN" ]; then
+        printf '  核心 %s\n' "$("$BIN" version 2>/dev/null | awk '/^Version/{print $2; exit}')"
+    fi
+    echo
+    show_hop
+}
+do_remove() {
+    p="${1:-}"; case "$p" in ''|*[!0-9]*) die '用法: remove <端口号>' ;; esac
+    if [ "$INIT" = systemd ]; then
+        systemctl disable --now "hy2-$p" >/dev/null 2>&1 || true
+        rm -f "/etc/systemd/system/hy2-$p.service"; systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    if [ "$INIT" = openrc ]; then
+        rc-service "hy2-$p" stop >/dev/null 2>&1 || true
+        rc-update del "hy2-$p" default >/dev/null 2>&1 || true; rm -f "/etc/init.d/hy2-$p"
+    fi
+    remove_hop "$p"  # ← 新增: 卸载时同时移除跳跃规则
+    rm -rf "$BASE/$p" "/var/log/hy2-$p.log"; ok "已卸载端口 $p"
+}
+case "${1:-}" in
+    list)             do_list; exit 0 ;;
+    remove|uninstall) do_remove "${2:-}"; exit 0 ;;
+    upgrade)          FORCE_CORE=1; UPGRADE_ALL=1; shift ;;
+    hop)              # ← 新增: 跳跃端口子命令
+        shift
+        case "${1:-}" in
+            remove) shift; HOP_RANGE="${HOP_RANGE:-54100-54200}"; parse_hop
+                    for d in "$BASE"/*/; do
+                        [ -f "${d}config.yaml" ] || continue
+                        remove_hop "$(basename "$d")"
+                    done ;;
+            *)      show_hop ;;
+        esac
+        exit 0 ;;
+esac
+
+PORT="${1:-$PORT_DEFAULT}"
+case "$PORT" in ''|*[!0-9]*) die "端口非法: $PORT" ;; esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "端口超范围: $PORT"
+PASSWORD="${PASSWORD:-$PASSWORD_DEFAULT}"; SNI="${SNI:-$SNI_DEFAULT}"; DIR="$BASE/$PORT"
+if [ "$INIT" = none ]; then die '未检测到 systemd / OpenRC'; fi
+
+MACH=$(uname -m)
+case "$MACH" in
+    x86_64|amd64)
+        if grep -qE '^flags[[:space:]]*:.*[[:space:]]avx2([[:space:]]|$)' /proc/cpuinfo 2>/dev/null
+        then ASSETS='hysteria-linux-amd64-avx hysteria-linux-amd64'
+        else ASSETS='hysteria-linux-amd64'; fi ;;
+    aarch64|arm64) ASSETS='hysteria-linux-arm64' ;;
+    armv7*)        ASSETS='hysteria-linux-armv7 hysteria-linux-arm' ;;
+    armv6*|armv5*) ASSETS='hysteria-linux-armv5 hysteria-linux-arm' ;;
+    i386|i686)     ASSETS='hysteria-linux-386' ;;
+    s390x)         ASSETS='hysteria-linux-s390x' ;;
+    riscv64)       ASSETS='hysteria-linux-riscv64' ;;
+    *) die "不支持的架构: $MACH" ;;
+esac
+
+# ---------- 档位: init 小 max 大, 窗口随实测 BDP 自动增长 ----------
+MEM=$(mem_val MemTotal); [ -n "${MEM:-}" ] || MEM=512
+CORES=$(nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 1)
+case "$TIER_ENV" in
+    64m|128m|512m|1g|nolimit) TIER="$TIER_ENV" ;;
+    *) if   [ "$MEM" -le 96  ]; then TIER=64m
+       elif [ "$MEM" -le 192 ]; then TIER=128m
+       elif [ "$MEM" -le 768 ]; then TIER=512m
+       else TIER=1g; fi ;;
+esac
+case "$TIER" in
+    64m)  Q_ISW=262144;  Q_MSW=4194304;  Q_ICW=524288;  Q_MCW=8388608
+          Q_STR=512;  GOGC=50;  SOCKBUF=8388608;  GOMEM=40MiB;  MASQ_DEF=string ;;
+    128m) Q_ISW=524288;  Q_MSW=8388608;  Q_ICW=1048576; Q_MCW=16777216
+          Q_STR=1024; GOGC=50;  SOCKBUF=16777216; GOMEM=80MiB;  MASQ_DEF=string ;;
+    512m) Q_ISW=1048576; Q_MSW=16777216; Q_ICW=2097152; Q_MCW=33554432
+          Q_STR=2048; GOGC=100; SOCKBUF=33554432; MASQ_DEF=proxy
+          g=$((MEM/3)); [ "$g" -ge 128 ] || g=128; GOMEM="${g}MiB" ;;
+    1g)   Q_ISW=2097152; Q_MSW=33554432; Q_ICW=4194304; Q_MCW=67108864
+          Q_STR=4096; GOGC=100; SOCKBUF=67108864; MASQ_DEF=proxy
+          g=$((MEM*3/5)); [ "$g" -ge 384 ] || g=384; GOMEM="${g}MiB" ;;
+    nolimit) Q_ISW=2097152; Q_MSW=67108864; Q_ICW=4194304; Q_MCW=134217728
+          Q_STR=8192; GOGC=100; SOCKBUF=134217728; GOMEM=''; MASQ_DEF=proxy ;;
+esac
+if [ -n "$WIN_STREAM_MB" ]; then Q_MSW=$((WIN_STREAM_MB*1048576)); fi
+if [ -n "$WIN_CONN_MB" ];   then Q_MCW=$((WIN_CONN_MB*1048576));   fi
+if [ "$Q_ISW" -gt "$Q_MSW" ]; then Q_ISW="$Q_MSW"; fi
+if [ "$Q_ICW" -gt "$Q_MCW" ]; then Q_ICW="$Q_MCW"; fi
+MASQ="${MASQ_ENV:-$MASQ_DEF}"
+if [ "$SPEEDTEST" = 1 ]; then ST=true; else ST=false; fi
+
+info '========================================'
+info '  Hysteria2 安装脚本'
+info '========================================'
+printf '  端口 %s  内存 %sMB  CPU %s核  架构 %s  init %s\n' \
+       "$PORT" "$MEM" "$CORES" "$MACH" "$INIT"
+printf '  档位 %s  流窗口 %s→%sMB  连接窗口 %s→%sMB  伪装 %s\n' "$TIER" \
+       "$((Q_ISW/1048576))" "$((Q_MSW/1048576))" \
+       "$((Q_ICW/1048576))" "$((Q_MCW/1048576))" "$MASQ"
+printf '  跳跃端口 %s\n' "$HOP_RANGE"  # ← 新增
+printf '  单连接理论上限:'
+for r in 50 100 200; do printf ' %sms→%sMbps' "$r" "$((Q_MCW*8/(r*1000)))"; done
+echo
+if [ -n "$GOMEM" ]; then printf '  GOMEMLIMIT %s  GOGC %s\n' "$GOMEM" "$GOGC"; fi
+echo
+if [ "$((Q_MCW/1048576))" -gt "$((MEM/2))" ]; then
+    warn "连接窗口 $((Q_MCW/1048576))MB 超过本机内存一半(${MEM}MB), 并发下载时极可能被 OOM 杀掉"
+fi
+
+if command -v ss >/dev/null 2>&1; then
+    if ss -lun 2>/dev/null | grep -q ":$PORT "; then warn "UDP $PORT 已被占用, 将被覆盖"; fi
+fi
+for t in curl wget; do
+    if ! command -v "$t" >/dev/null 2>&1; then pkg_install "$t" || true; fi
+done
+if [ "$PKG" = apk ]; then pkg_install ca-certificates || true; fi
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    die '缺少 curl/wget 且自动安装失败'
+fi
+if [ "$INIT" = systemd ]; then systemctl stop "hy2-$PORT" >/dev/null 2>&1 || true; fi
+if [ "$INIT" = openrc ];  then rc-service "hy2-$PORT" stop >/dev/null 2>&1 || true; fi
+mkdir -p "$DIR"
+
+fetch() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 300 \
+             -o "$2" "$1" 2>/dev/null && return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -T 15 -t 2 -O "$2" "$1" 2>/dev/null && return 0
+    fi
+    return 1
+}
+core_ok() { [ -s "$BIN" ] && [ -x "$BIN" ] && "$BIN" version >/dev/null 2>&1; }
+if [ -z "$HY2_VER" ] || [ "$HY2_VER" = latest ]; then REL='latest/download'
+else REL="download/app/$HY2_VER"; fi
+if core_ok && [ "$FORCE_CORE" != 1 ]; then
+    ok "核心已存在: $("$BIN" version 2>/dev/null | awk '/^Version/{print $2; exit}')"
+else
+    ok '下载 Hysteria2 核心...'
+    TMP="$BASE/.hy2.dl"; GOT=0
+    for a in $ASSETS; do
+        if [ "$GOT" = 1 ]; then break; fi
+        for m in '' 'https://ghfast.top/' 'https://gh-proxy.com/'; do
+            u="${m}https://github.com/apernet/hysteria/releases/$REL/$a"
+            printf '  尝试 %s\n' "$u"; rm -f "$TMP"
+            if fetch "$u" "$TMP" && [ -s "$TMP" ]; then
+                chmod +x "$TMP"
+                if "$TMP" version >/dev/null 2>&1; then
+                    mv -f "$TMP" "$BIN"; GOT=1; ok '  核心校验通过'; break
+                fi
+            fi
+        done
+    done
+    rm -f "$TMP"
+    [ "$GOT" = 1 ] || die "核心下载失败: 检查出网/DNS, 或手动放二进制到 $BIN"
+fi
+
+gen_cert() {
+    if ! command -v openssl >/dev/null 2>&1; then
+        warn '未找到 openssl, 尝试安装...'
+        if ! pkg_install openssl; then
+            try_swap || true; pkg_install openssl || true; drop_swap
+        fi
+    fi
+    command -v openssl >/dev/null 2>&1 || return 1
+    cat > "$DIR/openssl.cnf" <<EOF
+[req]
+prompt             = no
+default_md         = sha256
+distinguished_name = dn
+x509_extensions    = ext
+[dn]
+CN = ${SNI}
+[ext]
+basicConstraints = critical,CA:FALSE
+keyUsage         = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName   = @san
+[san]
+DNS.1 = ${SNI}
+DNS.2 = *.${SNI}
+EOF
+    openssl req -x509 -new -nodes -days 36500 \
+        -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+        -keyout "$DIR/server.key" -out "$DIR/server.crt" \
+        -config "$DIR/openssl.cnf" >/dev/null 2>&1 \
+    || openssl req -x509 -new -nodes -days 36500 -newkey rsa:2048 \
+        -keyout "$DIR/server.key" -out "$DIR/server.crt" \
+        -config "$DIR/openssl.cnf" >/dev/null 2>&1 || return 1
+    [ -s "$DIR/server.crt" ] && [ -s "$DIR/server.key" ]
+}
+ok '准备 TLS 证书...'
+if [ -n "$CERT" ] && [ -n "$KEY" ]; then
+    cp -f "$CERT" "$DIR/server.crt"; cp -f "$KEY" "$DIR/server.key"; ok '  使用外部证书'
+elif [ -s "$DIR/server.crt" ] && [ -s "$DIR/server.key" ]; then
+    ok '  复用已有证书, 指纹不变'
+else
+    for c in "$BASE"/*/server.crt; do
+        if [ -s "$c" ] && [ -s "${c%.crt}.key" ]; then
+            cp -f "$c" "$DIR/server.crt"; cp -f "${c%.crt}.key" "$DIR/server.key"
+            ok "  复用同机证书 ($c), 免装 openssl"; break
+        fi
+    done
+fi
+if [ ! -s "$DIR/server.crt" ] || [ ! -s "$DIR/server.key" ]; then
+    gen_cert || die "证书生成失败: 请先 apk add openssl / apt-get install -y openssl, 或用 CERT=/x.crt KEY=/x.key 指定现成证书"
+fi
+chmod 600 "$DIR/server.key"; chmod 644 "$DIR/server.crt"
+
+if [ "$MASQ" = string ]; then
+MASQ_BLOCK='masquerade:
+  type: string
+  string:
+    content: "404 page not found"
+    headers:
+      content-type: text/plain
+    statusCode: 404'
+else
+MASQ_BLOCK='masquerade:
+  type: proxy
+  proxy:
+    url: https://www.apple.com
+    rewriteHost: true'
+fi
+yaml_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+ok '写入配置...'
+cat > "$DIR/config.yaml" <<EOF
+listen: :${PORT}
+
+tls:
+  cert: ${DIR}/server.crt
+  key: ${DIR}/server.key
+
+auth:
+  type: password
+  password: "$(yaml_esc "$PASSWORD")"
+
+# 档位 ${TIER} / 内存 ${MEM}MB: init 小 max 大, 窗口按实测 BDP 自动增长
+# 单连接上限 = maxConnReceiveWindow / RTT, 与带宽标称无关
+quic:
+  initStreamReceiveWindow: ${Q_ISW}
+  maxStreamReceiveWindow: ${Q_MSW}
+  initConnReceiveWindow: ${Q_ICW}
+  maxConnReceiveWindow: ${Q_MCW}
+  maxIdleTimeout: 30s
+  maxIncomingStreams: ${Q_STR}
+
+# 不设 bandwidth = 走 BBR, 不做任何速率限制
+disableUDP: false
+udpIdleTimeout: 30s
+speedTest: ${ST}
+
+${MASQ_BLOCK}
+EOF
+
+if [ -d /etc/sysctl.d ]; then
+    printf 'net.core.rmem_max=%s\nnet.core.wmem_max=%s\n' "$SOCKBUF" "$SOCKBUF" \
+        > /etc/sysctl.d/99-hysteria.conf 2>/dev/null || true
+fi
+sysctl -w net.core.rmem_max="$SOCKBUF" >/dev/null 2>&1 || true
+sysctl -w net.core.wmem_max="$SOCKBUF" >/dev/null 2>&1 || true
+if command -v ufw >/dev/null 2>&1; then
+    ufw allow "$PORT"/udp >/dev/null 2>&1 || true
+    parse_hop; ufw allow "$HOP_START":"$HOP_END"/udp >/dev/null 2>&1 || true  # ← 新增
+fi
+if command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port="$PORT"/udp >/dev/null 2>&1 || true
+    parse_hop  # ← 新增
+    firewall-cmd --permanent --add-port="$HOP_START":"$HOP_END"/udp >/dev/null 2>&1 || true  # ← 新增
+    firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+
+ok '注册服务...'
+GOMEM_SD=''; GOMEM_RC=''
+if [ -n "$GOMEM" ]; then
+    GOMEM_SD="Environment=GOMEMLIMIT=$GOMEM"; GOMEM_RC="export GOMEMLIMIT=$GOMEM"
+fi
+if [ "$INIT" = systemd ]; then
+    cat > "/etc/systemd/system/hy2-$PORT.service" <<EOF
+[Unit]
+Description=Hysteria2 Server (port ${PORT})
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=${DIR}
+Environment=HYSTERIA_LOG_LEVEL=warn
+Environment=GOGC=${GOGC}
+${GOMEM_SD}
+ExecStart=${BIN} server -c ${DIR}/config.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+OOMScoreAdjust=-100
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable "hy2-$PORT" >/dev/null 2>&1
+    systemctl restart "hy2-$PORT"
+else
+    if [ -x /sbin/supervise-daemon ] || [ -x /usr/sbin/supervise-daemon ]; then
+        SUP="supervisor=supervise-daemon
+respawn_delay=5
+respawn_max=0
+supervise_daemon_args=\"--stdout /var/log/hy2-$PORT.log --stderr /var/log/hy2-$PORT.log\""
+    else
+        SUP="command_background=true
+output_log=\"/var/log/hy2-$PORT.log\"
+error_log=\"/var/log/hy2-$PORT.log\""
+    fi
+    cat > "/etc/init.d/hy2-$PORT" <<EOF
+#!/sbin/openrc-run
+name="hy2-${PORT}"
+description="Hysteria2 Server (port ${PORT})"
+command="${BIN}"
+command_args="server -c ${DIR}/config.yaml"
+directory="${DIR}"
+pidfile="/run/hy2-${PORT}.pid"
+${SUP}
+
+export HYSTERIA_LOG_LEVEL=warn
+export GOGC=${GOGC}
+${GOMEM_RC}
+
+depend() {
+    after net firewall
+}
+EOF
+    chmod +x "/etc/init.d/hy2-$PORT"
+    rc-update add "hy2-$PORT" default >/dev/null 2>&1 || true
+    rc-service "hy2-$PORT" restart >/dev/null 2>&1 || true
+fi
+
+proc_alive() { pgrep -f "server -c $DIR/config.yaml" >/dev/null 2>&1; }
+sleep 2; UP=1; proc_alive || UP=0; sleep 6; proc_alive || UP=0
+if [ "$UP" != 1 ]; then
+    err '服务未能保持运行, 最近日志:'
+    if [ "$INIT" = systemd ]; then journalctl -u "hy2-$PORT" -n 30 --no-pager 2>/dev/null || true
+    else tail -n 30 "/var/log/hy2-$PORT.log" 2>/dev/null || true; fi
+    echo "手动前台调试: $BIN server -c $DIR/config.yaml"; exit 1
+fi
+ok '✅ 服务运行中'
+
+# ← 新增: 自动配置跳跃端口
+configure_hop "$PORT"
+
+is_ip() {
+    [ -n "${1:-}" ] || return 1
+    case "$1" in *[!0-9a-fA-F:.]*) return 1 ;; esac
+    [ "${#1}" -ge 7 ] || return 1
+}
+has_addr() {
+    command -v ip >/dev/null 2>&1 || return 0
+    if [ "$1" = 6 ]; then ip -6 addr show scope global 2>/dev/null | grep -q inet6
+    else ip -4 addr show scope global 2>/dev/null | grep -q inet; fi
+}
+get_ip() {
+    fam="$1"; shift
+    for u in "$@"; do
+        v=$(curl "$fam" -fsS --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]') || v=''
+        is_ip "$v" || continue
+        case "$fam:$v" in
+            -4:*:*) continue ;;
+            -6:*:*) printf '%s' "$v"; return 0 ;;
+            -6:*)   continue ;;
+            *)      printf '%s' "$v"; return 0 ;;
+        esac
+    done
+    return 1
+}
+PIN=''; PIN_HEX=''
+if command -v openssl >/dev/null 2>&1; then
+    PIN=$(openssl x509 -noout -fingerprint -sha256 -in "$DIR/server.crt" 2>/dev/null \
+          | cut -d= -f2 || true)
+    PIN_HEX=$(printf '%s' "$PIN" | tr -d ':' | tr 'A-Z' 'a-z')
+fi
+PWENC=$(LC_ALL=C awk 'BEGIN{
+  for(n=0;n<256;n++) o[sprintf("%c",n)]=n
+  s=ARGV[1]
+  for(i=1;i<=length(s);i++){c=substr(s,i,1)
+    if(c ~ /^[A-Za-z0-9._~-]$/) printf "%s",c; else printf "%%%02X",o[c]}
+}' "$PASSWORD")
+IP4=''; IP6=''
+if [ -n "$EXT_IP" ]; then
+    case "$EXT_IP" in *:*) IP6="$EXT_IP" ;; *) IP4="$EXT_IP" ;; esac
+else
+    if has_addr 4; then
+        IP4=$(get_ip -4 https://api.ipify.org https://ipv4.icanhazip.com https://ifconfig.me/ip || true)
+    fi
+    if has_addr 6; then
+        IP6=$(get_ip -6 https://api64.ipify.org https://ipv6.icanhazip.com https://v6.ident.me || true)
+    fi
+fi
+SPORT="${EXT_PORT:-$PORT}"; PRIMARY="$IP4"; [ -n "$PRIMARY" ] || PRIMARY="$IP6"
+if [ -z "$PRIMARY" ]; then PRIMARY='<你的服务器IP>'; warn '公网 IP 检测失败, 请手动替换'; fi
+link_of() {
+    case "$1" in *:*) h="[$1]" ;; *) h="$1" ;; esac
+    if [ -n "$PIN" ]; then
+        echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}&pinSHA256=${PIN}#${2}"
+    else
+        echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}#${2}"
+    fi
+}
+echo; info '========================================'
+info '  ✅ 安装完成'; info '========================================'
+if [ -n "$IP4" ]; then printf '  IPv4 %s\n' "$IP4"; fi
+if [ -n "$IP6" ]; then printf '  IPv6 %s\n' "$IP6"; fi
+printf '  端口 %s\n  密码 %s\n  SNI  %s\n' "$SPORT" "$PASSWORD" "$SNI"
+if [ -n "$PIN" ]; then printf '  指纹 %s\n' "$PIN"; fi
+printf '  跳跃 %s → %s\n' "$HOP_RANGE" "$SPORT"  # ← 新增
+echo
+ok 'v2rayN / 通用链接:'
+if [ -n "$IP4" ]; then link_of "$IP4" "HY2-${SPORT}"; fi
+if [ -n "$IP6" ]; then link_of "$IP6" "HY2-${SPORT}-v6"; fi
+if [ -z "$IP4" ] && [ -z "$IP6" ]; then link_of "$PRIMARY" "HY2-${SPORT}"; fi
+if [ -n "$IP6" ] && [ -z "$IP4" ]; then warn '  仅有 IPv6, 客户端网络必须有 v6 出口'; fi
+echo
+ok 'Sing-box:'
+cat <<EOF
+{
+  "type": "hysteria2",
+  "tag": "HY2-${SPORT}",
+  "server": "${PRIMARY}",
+  "server_port": ${SPORT},
+  "password": "${PASSWORD}",
+  "tls": { "enabled": true, "server_name": "${SNI}", "insecure": true, "alpn": ["h3"] }
+}
+EOF
+echo
+ok 'Clash Meta:'
+cat <<EOF
+- name: HY2-${SPORT}
+  type: hysteria2
+  server: ${PRIMARY}
+  port: ${SPORT}
+  password: ${PASSWORD}
+  sni: ${SNI}
+  skip-cert-verify: true
+  alpn: [h3]
+EOF
+if [ -n "$PIN_HEX" ]; then
+    echo "  # fingerprint: ${PIN_HEX}   # mihomo 支持时启用可校验证书, 报错则删除"
+fi
+if [ -n "$IP4" ] && [ -n "$IP6" ]; then
+    echo "  # 走 IPv6 把 server 换成 ${IP6}, 双栈监听同一端口"
+fi
+echo
+ok '客户端 QUIC 窗口 (hysteria 原生客户端 / v2rayN 自定义配置):'
+echo '  下载方向受客户端窗口限制, 服务端调大了客户端也必须同步调, 否则跑不满'
+cat <<EOF
+quic:
+  initStreamReceiveWindow: ${Q_ISW}
+  maxStreamReceiveWindow: ${Q_MSW}
+  initConnReceiveWindow: ${Q_ICW}
+  maxConnReceiveWindow: ${Q_MCW}
+EOF
+echo
+if [ "$UPGRADE_ALL" = 1 ]; then
+    for d in "$BASE"/*/; do
+        [ -f "${d}config.yaml" ] || continue
+        p=$(basename "$d")
+        if [ "$p" = "$PORT" ]; then continue; fi
+        if [ "$INIT" = systemd ]; then systemctl restart "hy2-$p" >/dev/null 2>&1 || true
+        else rc-service "hy2-$p" restart >/dev/null 2>&1 || true; fi
+        ok "已重启 hy2-$p"
+    done
+fi
+warn '管理命令:'
+if [ "$INIT" = systemd ]; then
+    echo "  状态 systemctl status hy2-$PORT"
+    echo "  日志 journalctl -u hy2-$PORT -f"
+    echo "  重启 systemctl restart hy2-$PORT"
+else
+    echo "  状态 rc-service hy2-$PORT status"
+    echo "  日志 tail -f /var/log/hy2-$PORT.log"
+    echo "  重启 rc-service hy2-$PORT restart"
+fi
+echo "  列表 sh $0 list      升级 sh $0 upgrade      卸载 sh $0 remove $PORT"
+echo "  跳跃 sh $0 hop       移除 sh $0 hop remove"  # ← 新增
+case "$0" in
+    /dev/fd/*|/proc/self/fd/*|sh|bash|-sh|-bash)
+        warn '  当前以管道方式运行, 上面路径无效: install -m 755 <脚本> /usr/local/bin/hy2ctl' ;;
+esac
+echo
+warn "NAT 机器确认: ① $SPORT 在分配的端口段内 ② 面板已转发 UDP ③ 对外端口不同请用 EXT_PORT= 重跑"
+info '========================================'
