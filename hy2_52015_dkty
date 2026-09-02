@@ -568,7 +568,7 @@ link_of() {
     if [ -n "$PIN" ]; then
         echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}&pinSHA256=${PIN}&mport=${HOP_START}-${HOP_END}#${2}"
     else
-        echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}#${2}"
+        echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}&mport=${HOP_START}-${HOP_END}#${2}"
     fi
 }
 echo; info '========================================'
