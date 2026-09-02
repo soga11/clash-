@@ -566,7 +566,7 @@ if [ -z "$PRIMARY" ]; then PRIMARY='<你的服务器IP>'; warn '公网 IP 检测
 link_of() {
     case "$1" in *:*) h="[$1]" ;; *) h="$1" ;; esac
     if [ -n "$PIN" ]; then
-        echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}&pinSHA256=${PIN}#${2}"
+        echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}&pinSHA256=${PIN}&mport=${HOP_START}-${HOP_END}#${2}"
     else
         echo "hy2://${PWENC}@${h}:${SPORT}/?insecure=1&sni=${SNI}#${2}"
     fi
