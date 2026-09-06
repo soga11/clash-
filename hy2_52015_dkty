@@ -1,5 +1,5 @@
 #!/bin/sh
-# Hysteria2 安装/管理脚本 — 64MB NAT ~ 1G口全档位, Alpine/Debian/Ubuntu 通用 (优化版)
+# Hysteria2 安装/管理脚本 — 64MB NAT ~ 1G口全档位, Alpine/Debian/Ubuntu 通用 (POSIX sh兼容版)
 #   sh hy2.sh                 安装, 端口 52015        sh hy2.sh 15300   指定端口
 #   TIER=auto|64m|128m|512m|1g|nolimit                档位, 默认按内存自动
 #   WIN_STREAM_MB=48 WIN_CONN_MB=96                   手动覆盖窗口(MB)
@@ -93,39 +93,32 @@ parse_hop() {
     case "$HOP_END" in ''|*[!0-9]*) die "跳跃结束端口非法: $HOP_END" ;; esac
 }
 
-# ==================== 【优化】跳跃端口依赖检查 ====================
+# ==================== 【POSIX兼容】跳跃端口依赖检查 ====================
 check_hop_dependencies() {
-    local missing=()
-    
     # 检查iptables
     if ! command -v iptables >/dev/null 2>&1; then
-        missing+=("iptables")
+        warn "跳跃端口需要 iptables，正在安装..."
+        if ! pkg_install iptables; then
+            err "iptables 安装失败，请手动安装后重试"
+            return 1
+        fi
     fi
     
     # 检查ip6tables
     if ! command -v ip6tables >/dev/null 2>&1; then
-        missing+=("ip6tables")
+        warn "跳跃端口需要 ip6tables，正在安装..."
+        if ! pkg_install ip6tables; then
+            err "ip6tables 安装失败，请手动安装后重试"
+            return 1
+        fi
     fi
     
-    # 自动安装缺失依赖
-    if [ ${#missing[@]} -gt 0 ]; then
-        warn "跳跃端口需要以下依赖: ${missing[*]}"
-        warn "正在自动安装..."
-        
-        for pkg in "${missing[@]}"; do
-            if ! pkg_install "$pkg"; then
-                err "安装 $pkg 失败，请手动安装后重试"
-                return 1
-            fi
-        done
-        ok "依赖安装完成"
-    fi
     return 0
 }
 
-# ==================== 【优化】配置跳跃端口 ====================
+# ==================== 【POSIX兼容】配置跳跃端口 ====================
 configure_hop() {
-    local port="$1"
+    port="$1"
     
     # 1. 检查依赖
     if ! check_hop_dependencies; then
@@ -137,23 +130,17 @@ configure_hop() {
     get_nic
     
     # 2. 清理旧规则
-    local clean_success=true
     iptables -t nat -S PREROUTING 2>/dev/null | grep "dport $HOP_START:$HOP_END" | while read -r line; do
-        if ! iptables -t nat $(echo "$line" | sed 's/-A/-D/'); then
-            warn "清理旧IPv4规则失败"
-            clean_success=false
-        fi
-    done
+        iptables -t nat $(echo "$line" | sed 's/-A/-D/') || warn "清理旧IPv4规则失败"
+    done || true
     
     ip6tables -t nat -S PREROUTING 2>/dev/null | grep "dport $HOP_START:$HOP_END" | while read -r line; do
-        if ! ip6tables -t nat $(echo "$line" | sed 's/-A/-D/'); then
-            warn "清理旧IPv6规则失败"
-            clean_success=false
-        fi
-    done
+        ip6tables -t nat $(echo "$line" | sed 's/-A/-D/') || warn "清理旧IPv6规则失败"
+    done || true
     
     # 3. 添加新规则
-    local ipv4_ok=false ipv6_ok=false
+    ipv4_ok=false
+    ipv6_ok=false
     
     if iptables -t nat -A PREROUTING -i "$NIC" -p udp --dport "$HOP_START":"$HOP_END" -j DNAT --to-destination :"$port"; then
         ipv4_ok=true
@@ -200,12 +187,13 @@ configure_hop() {
     return 0
 }
 
-# ==================== 【优化】验证跳跃端口 ====================
+# ==================== 【POSIX兼容】验证跳跃端口 ====================
 verify_hop() {
-    local port="$1"
+    port="$1"
     parse_hop
     
-    local ipv4_ok=false ipv6_ok=false
+    ipv4_ok=false
+    ipv6_ok=false
     
     # 验证IPv4规则
     if iptables -t nat -C PREROUTING -i "$NIC" -p udp --dport "$HOP_START":"$HOP_END" -j DNAT --to-destination :"$port" 2>/dev/null; then
@@ -226,7 +214,7 @@ verify_hop() {
 
 # ==================== 移除跳跃端口 ====================
 remove_hop() {
-    local port="$1"
+    port="$1"
     parse_hop
     get_nic
 
@@ -361,7 +349,7 @@ MASQ="${MASQ_ENV:-$MASQ_DEF}"
 if [ "$SPEEDTEST" = 1 ]; then ST=true; else ST=false; fi
 
 info '========================================'
-info '  Hysteria2 安装脚本 (优化版)'
+info '  Hysteria2 安装脚本 (POSIX兼容版)'
 info '========================================'
 printf '  端口 %s  内存 %sMB  CPU %s核  架构 %s  init %s\n' \
        "$PORT" "$MEM" "$CORES" "$MACH" "$INIT"
