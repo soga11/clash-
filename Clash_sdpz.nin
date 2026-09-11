@@ -1,49 +1,33 @@
 # ========================
-# Clash 精简版 v6.1
-# 基于v5精简 · 保持ini格式
+# Clash 精简版 v6.3
+# 规则精简版
 # ========================
 
 # ========================
 # 规则部分
 # ========================
 
-# --- 第 0 优先级：本地网络 + 强制直连 ---
+# --- 第 0 优先级：本地网络 ---
 ruleset=全球直连,[]DOMAIN-SUFFIX,300111.xyz
 ruleset=全球直连,https://raw.githubusercontent.com/loganoxo/thisrule/refs/heads/master/rule/Lan/Clash/Lan.list
 
-# --- 第 1 优先级：DNS 分流 ---
+# --- 第 1 优先级：DNS 分流（精简）---
 ruleset=全球直连,[]IP-CIDR,211.138.240.100/32,no-resolve
 ruleset=全球直连,[]IP-CIDR,211.138.245.180/32,no-resolve
-ruleset=全球直连,[]IP-CIDR,223.5.5.5/32,no-resolve
-ruleset=全球直连,[]IP-CIDR,119.29.29.29/32,no-resolve
-ruleset=全球直连,[]DOMAIN-SUFFIX,dns.pub
-ruleset=全球直连,[]DOMAIN-SUFFIX,doh.pub
 ruleset=全球直连,[]DOMAIN-SUFFIX,alidns.com
 ruleset=节点选择,[]IP-CIDR,1.1.1.1/32,no-resolve
-ruleset=节点选择,[]IP-CIDR,8.8.8.8/32,no-resolve
-ruleset=节点选择,[]DOMAIN-SUFFIX,cloudflare-dns.com
 ruleset=节点选择,[]DOMAIN-SUFFIX,dns.google
 
-# --- 第 2 优先级：广告拦截 ---
+# --- 第 2 优先级：广告拦截（精简）---
 ruleset=广告拦截,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/BlockHttpDNS/BlockHttpDNS.list
-ruleset=广告拦截,https://cdn.jsdelivr.net/gh/privacy-protection-tools/anti-AD/master/anti-ad-domains.txt
-ruleset=广告拦截,[]DOMAIN-SUFFIX,mcdn.bilivideo.com
-ruleset=广告拦截,[]DOMAIN-SUFFIX,mcdn.bilivideo.cn
-ruleset=广告拦截,[]DOMAIN-SUFFIX,szbdyd.com
-ruleset=广告拦截,[]DOMAIN-SUFFIX,mountaintoys.cn
 
-# --- 第 3 优先级：核心国际应用分流 ---
+# --- 第 3 优先级：核心国际应用（精简）---
 ruleset=ChatGPT,https://raw.githubusercontent.com/loganoxo/thisrule/refs/heads/master/rule/AI/Clash/AI.list
 ruleset=电报消息,https://raw.githubusercontent.com/jnlaoshu/MySelf/refs/heads/main/Clash/Rule/Telegram.yaml
 ruleset=油管视频,https://raw.githubusercontent.com/loganoxo/thisrule/refs/heads/master/rule/YouTube/Clash/YouTube.list
-ruleset=油管视频,[]DOMAIN-SUFFIX,youtu.be
-ruleset=油管视频,[]DOMAIN-SUFFIX,googlevideo.com
-ruleset=奈飞视频,https://raw.githubusercontent.com/jnlaoshu/MySelf/refs/heads/main/Clash/Rule/Netflix.yaml
 ruleset=TikTok,https://raw.githubusercontent.com/jnlaoshu/MySelf/refs/heads/main/Clash/Rule/TikTok.yaml
 ruleset=节点选择,https://raw.githubusercontent.com/loganoxo/thisrule/refs/heads/master/rule/Google/Clash/Google.list
-ruleset=全球直连,[]DOMAIN-SUFFIX,push.apple.com
 ruleset=苹果服务,https://raw.githubusercontent.com/loganoxo/thisrule/refs/heads/master/rule/Apple/Clash/Apple.list
-ruleset=香港流媒体,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/TVB/TVB.list
 
 # --- 第 4 优先级：直连补充 ---
 ruleset=全球直连,https://raw.githubusercontent.com/loganoxo/thisrule/refs/heads/master/rule/DirectGlobal/Clash/DirectGlobal.list
@@ -59,19 +43,17 @@ ruleset=全球直连,[]GEOIP,CN
 ruleset=漏网之鱼,[]FINAL
 
 # ========================
-# 策略组部分（精简版）
+# 策略组部分
 # ========================
 
-# --- 应用分组（手动选择，无自动测试）---
+# --- 应用分组（手动选择）---
 custom_proxy_group=节点选择`select`[]香港负载`[]台湾负载`[]去广告`[]DIRECT`.*
 custom_proxy_group=油管视频`select`[]去广告`[]台湾负载`[]香港负载`[]节点选择`[]DIRECT`.*
-custom_proxy_group=香港流媒体`select`[]香港负载`[]去广告`[]节点选择`.*
 custom_proxy_group=ChatGPT`select`[]台湾负载`[]香港负载`[]节点选择`[]DIRECT`.*
 custom_proxy_group=TikTok`select`[]台湾负载`[]香港负载`[]节点选择`.*
-custom_proxy_group=奈飞视频`select`[]台湾负载`[]香港负载`[]节点选择`.*
 custom_proxy_group=电报消息`select`[]香港负载`[]去广告`[]节点选择`.*
 
-# --- 地区分组（仅3个，自动测试 900秒）---
+# --- 地区分组（3个，自动测试 900秒）---
 custom_proxy_group=香港负载`load-balance`(香港电视)`http://cp.cloudflare.com/generate_204`900,100,10
 custom_proxy_group=台湾负载`load-balance`(台湾)`http://cp.cloudflare.com/generate_204`900,100,10
 custom_proxy_group=去广告`load-balance`(去广告)`http://cp.cloudflare.com/generate_204`900,100,10
