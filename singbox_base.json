@@ -3,7 +3,7 @@
 
   "log": {
     "level": "warn",
-    "timestamp": false
+    "timestamp": true
   },
 
   "dns": {
