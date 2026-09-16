@@ -48,8 +48,7 @@
   },
   "experimental": {
     "cache_file": {
-      "enabled": true,
-      "store_fakeip": true
+      "enabled": true
     },
     "clash_api": {
       "external_controller": "127.0.0.1:9090",
@@ -60,30 +59,22 @@
     {
       "type": "direct",
       "tag": "dns-in",
-      "listen": "::",
-      "listen_port": 6053
-    },
-    {
-      "type": "redirect",
-      "tag": "redirect-in",
-      "listen": "::",
-      "listen_port": 6054
-    },
-    {
-      "type": "tproxy",
-      "tag": "tproxy-in",
-      "listen": "::",
-      "listen_port": 6055,
-      "udp_fragment": true
+      "listen": "0.0.0.0",
+      "listen_port": 1053
     },
     {
       "type": "tun",
       "tag": "tun-in",
-      "interface_name": "singtun0",
       "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-      "mtu": 9000,
-      "auto_route": false,
-      "strict_route": false
+      "auto_route": true,
+      "strict_route": true,
+      "mtu": 9000
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2334
     }
   ],
   "outbounds": [
@@ -124,28 +115,28 @@
       "tag": "🇭🇰 香港负载",
       "type": "urltest",
       "outbounds": [],
-      "filter": "香港|HK|HKG|Hong Kong",
+      "filter": "电视",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
-      "tolerance": 100
+      "interval": "10m",
+      "tolerance": 30
     },
     {
       "tag": "🇨🇳 台湾负载",
       "type": "urltest",
       "outbounds": [],
-      "filter": "台湾|臺|TW|Taiwan|TPE",
+      "filter": "台湾",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
-      "tolerance": 100
+      "interval": "10m",
+      "tolerance": 30
     },
     {
       "tag": "🛡️ 去广告",
       "type": "urltest",
       "outbounds": [],
-      "filter": "去广告|广告|AdGuard",
+      "filter": "去广告",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
-      "tolerance": 100
+      "interval": "10m",
+      "tolerance": 30
     },
     {
       "tag": "🐟 漏网之鱼",
@@ -174,9 +165,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-cn",
@@ -184,9 +173,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-category-ads-all",
@@ -194,9 +181,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-youtube",
@@ -204,9 +189,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/youtube.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-google",
@@ -214,9 +197,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-openai",
@@ -224,9 +205,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-anthropic",
@@ -234,9 +213,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/anthropic.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-google-gemini",
@@ -244,9 +221,7 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google-gemini.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       },
       {
         "tag": "geosite-telegram",
@@ -254,21 +229,16 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/telegram.srs",
         "update_interval": "24h",
-        "http_client": {
-          "detour": "🚀 节点选择"
-        }
+        "download_detour": "🚀 节点选择"
       }
     ],
     "rules": [
       {
-        "action": "sniff",
-        "inbound": ["dns-in", "tun-in", "redirect-in", "tproxy-in"]
+        "action": "sniff"
       },
       {
-        "type": "logical",
-        "mode": "or",
-        "rules": [{ "port": 53 }, { "protocol": "dns" }],
-        "action": "hijack-dns"
+        "action": "hijack-dns",
+        "protocol": "dns"
       },
       {
         "action": "resolve",
