@@ -26,6 +26,14 @@
     ],
     "rules": [
       {
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
+        "rewrite_ttl": 1,
+        "server": "fakeip"
+      },
+      {
         "clash_mode": "global",
         "server": "remote"
       },
@@ -36,11 +44,6 @@
       {
         "rule_set": "geosite-cn",
         "server": "local"
-      },
-      {
-        "query_type": ["A", "AAAA"],
-        "rewrite_ttl": 1,
-        "server": "fakeip"
       }
     ],
     "strategy": "prefer_ipv4",
@@ -80,7 +83,10 @@
       "type": "tun",
       "tag": "tun-in",
       "interface_name": "singtun0",
-      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
       "mtu": 9000,
       "auto_route": false,
       "strict_route": false
@@ -90,7 +96,13 @@
     {
       "tag": "🚀 节点选择",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "DIRECT"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "DIRECT"
+      ]
     },
     {
       "tag": "👋 手动选择",
@@ -108,17 +120,35 @@
     {
       "tag": "📹 油管视频",
       "type": "selector",
-      "outbounds": ["🛡️ 去广告", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🛡️ 去广告",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "💬 ChatGPT",
       "type": "selector",
-      "outbounds": ["🇨🇳 台湾负载", "👋 手动选择", "♻️ 自动选择", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🇨🇳 台湾负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "📲 电报消息",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "🚀 节点选择"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "🚀 节点选择"
+      ]
     },
     {
       "tag": "🇭🇰 香港负载",
@@ -147,7 +177,10 @@
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
-      "outbounds": ["🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "DIRECT",
@@ -259,12 +292,24 @@
     "rules": [
       {
         "action": "sniff",
-        "inbound": ["dns-in", "tun-in", "redirect-in", "tproxy-in"]
+        "inbound": [
+          "dns-in",
+          "tun-in",
+          "redirect-in",
+          "tproxy-in"
+        ]
       },
       {
         "type": "logical",
         "mode": "or",
-        "rules": [{ "port": 53 }, { "protocol": "dns" }],
+        "rules": [
+          {
+            "port": 53
+          },
+          {
+            "protocol": "dns"
+          }
+        ],
         "action": "hijack-dns"
       },
       {
@@ -292,7 +337,11 @@
         "outbound": "📹 油管视频"
       },
       {
-        "rule_set": ["geosite-openai", "geosite-anthropic", "geosite-google-gemini"],
+        "rule_set": [
+          "geosite-openai",
+          "geosite-anthropic",
+          "geosite-google-gemini"
+        ],
         "outbound": "💬 ChatGPT"
       },
       {
