@@ -1,11 +1,9 @@
 {
   "$schema": "https://sing-box.sagernet.org/schema.json",
-
   "log": {
     "level": "warn",
     "timestamp": false
   },
-
   "dns": {
     "servers": [
       {
@@ -26,7 +24,6 @@
         "inet6_range": "2001:0470:f9da:fdfa::1/64"
       }
     ],
-
     "rules": [
       {
         "clash_mode": "global",
@@ -41,51 +38,38 @@
         "server": "local"
       },
       {
-        "query_type": [
-          "A",
-          "AAAA"
-        ],
+        "query_type": ["A", "AAAA"],
         "rewrite_ttl": 1,
         "server": "fakeip"
       }
     ],
-
     "strategy": "prefer_ipv4",
     "final": "remote"
   },
-
   "experimental": {
     "cache_file": {
-      "enabled": true,
-      "store_fakeip": true
+      "enabled": true
     },
-
     "clash_api": {
-      "external_controller": "0.0.0.0:9090",
+      "external_controller": "127.0.0.1:9090",
       "secret": ""
     }
   },
-
   "inbounds": [
+    {
+      "type": "direct",
+      "tag": "dns-in",
+      "listen": "0.0.0.0",
+      "listen_port": 1053
+    },
     {
       "type": "tun",
       "tag": "tun-in",
-      "interface_name": "singtun0",
-
-      "address": [
-        "172.19.0.1/30",
-        "fdfe:dcba:9876::1/126"
-      ],
-
-      "mtu": 1500,
-
+      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
       "auto_route": true,
-      "auto_redirect": true,
       "strict_route": true,
-
-      "dns_mode": "hijack"
+      "mtu": 9000
     },
-
     {
       "type": "mixed",
       "tag": "mixed-in",
@@ -93,74 +77,41 @@
       "listen_port": 2334
     }
   ],
-
   "outbounds": [
     {
       "tag": "🚀 节点选择",
       "type": "selector",
-      "outbounds": [
-        "🇭🇰 香港负载",
-        "👋 手动选择",
-        "♻️ 自动选择",
-        "🇨🇳 台湾负载",
-        "DIRECT"
-      ]
+      "outbounds": ["🇭🇰 香港负载", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "DIRECT"]
     },
-
     {
       "tag": "👋 手动选择",
       "type": "selector",
       "outbounds": []
     },
-
     {
       "tag": "♻️ 自动选择",
       "type": "urltest",
       "outbounds": [],
-      "url": "https://www.gstatic.com/generate_204",
-      "interval": "5m",
-      "tolerance": 30,
-      "idle_timeout": "30m",
-      "interrupt_exist_connections": false
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
     },
-
     {
       "tag": "📹 油管视频",
       "type": "selector",
-      "outbounds": [
-        "🛡️ 去广告",
-        "👋 手动选择",
-        "♻️ 自动选择",
-        "🇨🇳 台湾负载",
-        "🇭🇰 香港负载",
-        "🚀 节点选择",
-        "DIRECT"
-      ]
+      "outbounds": ["🛡️ 去广告", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
     },
-
     {
       "tag": "💬 ChatGPT",
       "type": "selector",
-      "outbounds": [
-        "🇨🇳 台湾负载",
-        "👋 手动选择",
-        "♻️ 自动选择",
-        "🇭🇰 香港负载",
-        "🚀 节点选择",
-        "DIRECT"
-      ]
+      "outbounds": ["🇨🇳 台湾负载", "👋 手动选择", "♻️ 自动选择", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
     },
-
     {
       "tag": "📲 电报消息",
       "type": "selector",
-      "outbounds": [
-        "🇭🇰 香港负载",
-        "🚀 节点选择"
-      ]
+      "outbounds": ["🇭🇰 香港负载", "🚀 节点选择"]
     },
-
- {
+    {
       "tag": "🇭🇰 香港负载",
       "type": "urltest",
       "outbounds": [],
@@ -187,36 +138,26 @@
       "interval": "10m",
       "tolerance": 30
     },
-
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
-      "outbounds": [
-        "🚀 节点选择",
-        "DIRECT"
-      ]
+      "outbounds": ["🚀 节点选择", "DIRECT"]
     },
-
     {
       "tag": "DIRECT",
       "type": "direct"
     },
-
     {
       "tag": "REJECT",
       "type": "block"
     }
   ],
-
   "route": {
     "auto_detect_interface": true,
-
     "default_domain_resolver": {
       "server": "local"
     },
-
     "final": "🐟 漏网之鱼",
-
     "rule_set": [
       {
         "tag": "geoip-cn",
@@ -228,7 +169,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-cn",
         "type": "remote",
@@ -239,7 +179,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-category-ads-all",
         "type": "remote",
@@ -250,7 +189,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-youtube",
         "type": "remote",
@@ -261,7 +199,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-google",
         "type": "remote",
@@ -272,7 +209,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-openai",
         "type": "remote",
@@ -283,7 +219,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-anthropic",
         "type": "remote",
@@ -294,7 +229,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-google-gemini",
         "type": "remote",
@@ -305,7 +239,6 @@
           "detour": "🚀 节点选择"
         }
       },
-
       {
         "tag": "geosite-telegram",
         "type": "remote",
@@ -317,56 +250,42 @@
         }
       }
     ],
-
     "rules": [
       {
         "action": "sniff"
       },
-
       {
         "action": "hijack-dns",
         "protocol": "dns"
       },
-
       {
         "action": "resolve",
         "strategy": "prefer_ipv4"
       },
-
       {
         "clash_mode": "direct",
         "outbound": "DIRECT"
       },
-
       {
         "clash_mode": "global",
         "outbound": "🚀 节点选择"
       },
-
       {
         "ip_is_private": true,
         "outbound": "DIRECT"
       },
-
       {
         "rule_set": "geosite-category-ads-all",
         "outbound": "REJECT"
       },
-
       {
         "rule_set": "geosite-youtube",
         "outbound": "📹 油管视频"
       },
-
       {
-        "rule_set": [
-          "geosite-openai",
-          "geosite-anthropic",
-          "geosite-google-gemini"
-        ],
+        "rule_set": ["geosite-openai", "geosite-anthropic", "geosite-google-gemini"],
         "outbound": "💬 ChatGPT"
       },
-
       {
         "domain_suffix": [
           ".deepseek.com",
@@ -379,22 +298,18 @@
         ],
         "outbound": "💬 ChatGPT"
       },
-
       {
         "rule_set": "geosite-telegram",
         "outbound": "📲 电报消息"
       },
-
       {
         "rule_set": "geosite-google",
         "outbound": "🚀 节点选择"
       },
-
       {
         "rule_set": "geosite-cn",
         "outbound": "DIRECT"
       },
-
       {
         "rule_set": "geoip-cn",
         "outbound": "DIRECT"
