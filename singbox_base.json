@@ -4,7 +4,6 @@
     "level": "warn",
     "timestamp": false
   },
-
   "dns": {
     "servers": [
       {
@@ -36,7 +35,6 @@
     "strategy": "prefer_ipv4",
     "final": "remote"
   },
-
   "experimental": {
     "cache_file": {
       "enabled": true
@@ -46,16 +44,15 @@
       "secret": ""
     }
   },
-
   "inbounds": [
     {
       "type": "mixed",
       "tag": "mixed-in",
       "listen": "127.0.0.1",
-      "listen_port": 2334
+      "listen_port": 7890,
+      "set_system_proxy": true
     }
   ],
-
   "outbounds": [
     {
       "tag": "🚀 节点选择",
@@ -155,14 +152,12 @@
       "type": "block"
     }
   ],
-
   "route": {
     "auto_detect_interface": true,
     "default_domain_resolver": {
       "server": "local"
     },
     "final": "🐟 漏网之鱼",
-
     "rule_set": [
       {
         "tag": "geoip-cn",
@@ -255,7 +250,6 @@
         }
       }
     ],
-
     "rules": [
       {
         "action": "sniff"
