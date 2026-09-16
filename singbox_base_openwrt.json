@@ -26,11 +26,6 @@
     ],
     "rules": [
       {
-        "query_type": ["A", "AAAA"],
-        "rewrite_ttl": 1,
-        "server": "fakeip"
-      },
-      {
         "clash_mode": "global",
         "server": "remote"
       },
@@ -41,6 +36,11 @@
       {
         "rule_set": "geosite-cn",
         "server": "local"
+      },
+      {
+        "query_type": ["A", "AAAA"],
+        "rewrite_ttl": 1,
+        "server": "fakeip"
       }
     ],
     "strategy": "prefer_ipv4",
