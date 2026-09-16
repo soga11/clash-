@@ -1,71 +1,294 @@
 {
   "$schema": "https://sing-box.sagernet.org/schema.json",
-  "log": { "level": "info", "timestamp": true },
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
   "dns": {
     "servers": [
-      { "tag": "remote", "type": "https", "server": "8.8.8.8", "detour": "🚀 节点选择" },
-      { "tag": "local", "type": "https", "server": "223.5.5.5" },
-      { "tag": "fakeip", "type": "fakeip", "inet4_range": "198.18.0.0/15", "inet6_range": "2001:0470:f9da:fdfa::1/64" }
+      {
+        "tag": "remote",
+        "type": "https",
+        "server": "8.8.8.8",
+        "detour": "🚀 节点选择"
+      },
+      {
+        "tag": "local",
+        "type": "https",
+        "server": "223.5.5.5"
+      },
+      {
+        "tag": "fakeip",
+        "type": "fakeip",
+        "inet4_range": "198.18.0.0/15",
+        "inet6_range": "2001:0470:f9da:fdfa::1/64"
+      }
     ],
     "rules": [
-      { "query_type": ["A","AAAA"], "rewrite_ttl": 1, "server": "fakeip" },
-      { "clash_mode": "global", "server": "remote" },
-      { "clash_mode": "direct", "server": "local" },
-      { "rule_set": "geosite-cn", "server": "local" },
-      { "rule_set": "ext-cn-domain", "server": "local" }
+      {
+        "query_type": ["A", "AAAA"],
+        "rewrite_ttl": 1,
+        "server": "fakeip"
+      },
+      {
+        "clash_mode": "global",
+        "server": "remote"
+      },
+      {
+        "clash_mode": "direct",
+        "server": "local"
+      },
+      {
+        "rule_set": "geosite-cn",
+        "server": "local"
+      },
+      {
+        "rule_set": "ext-cn-domain",
+        "server": "local"
+      }
     ],
     "strategy": "prefer_ipv4",
     "final": "remote"
   },
   "experimental": {
-    "cache_file": { "enabled": true },
-    "clash_api": { "external_controller": "127.0.0.1:9090", "secret": "" }
+    "cache_file": {
+      "enabled": true
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": ""
+    }
   },
   "inbounds": [
-    { "type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30","fdfe:dcba:9876::1/126"], "auto_route": true, "strict_route": true, "stack": "mixed", "mtu": 9000 },
-    { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2334 }
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "auto_route": true,
+      "strict_route": true,
+      "mtu": 9000
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2334
+    }
   ],
   "outbounds": [
-    { "tag": "🚀 节点选择", "type": "selector", "outbounds": ["🇭🇰 香港负载","🇨🇳 台湾负载","🛡️ 去广告","DIRECT"] },
-    { "tag": "📹 油管视频", "type": "selector", "outbounds": ["🛡️ 去广告","🇨🇳 台湾负载","🇭🇰 香港负载","🚀 节点选择","DIRECT"] },
-    { "tag": "💬 ChatGPT", "type": "selector", "outbounds": ["🇨🇳 台湾负载","🇭🇰 香港负载","🚀 节点选择","DIRECT"] },
-    { "tag": "🎵 TikTok", "type": "selector", "outbounds": ["🇨🇳 台湾负载","🇭🇰 香港负载","🚀 节点选择"] },
-    { "tag": "📲 电报消息", "type": "selector", "outbounds": ["🇭🇰 香港负载","🛡️ 去广告","🚀 节点选择"] },
-    { "tag": "🍎 苹果服务", "type": "selector", "outbounds": ["DIRECT","🚀 节点选择"] },
-    { "tag": "🏠 局域网", "type": "selector", "outbounds": ["DIRECT","🚀 节点选择"] },
-    { "tag": "🇭🇰 香港负载", "type": "urltest", "url": "http://cp.cloudflare.com/generate_204", "interval": "15m", "tolerance": 100, "filter": "香港|HK", "outbounds": [] },
-    { "tag": "🇨🇳 台湾负载", "type": "urltest", "url": "http://cp.cloudflare.com/generate_204", "interval": "15m", "tolerance": 100, "filter": "台湾|TW", "outbounds": [] },
-    { "tag": "🛡️ 去广告", "type": "urltest", "url": "http://cp.cloudflare.com/generate_204", "interval": "15m", "tolerance": 100, "filter": "去广告", "outbounds": [] },
-    { "tag": "🐟 漏网之鱼", "type": "selector", "outbounds": ["🚀 节点选择","DIRECT"] },
-    { "tag": "DIRECT", "type": "direct" },
-    { "tag": "REJECT", "type": "block" }
+    {
+      "tag": "🚀 节点选择",
+      "type": "selector",
+      "outbounds": ["♻️ 自动选择", "👋 手动选择", "🇭🇰 香港负载", "🇨🇳 台湾负载", "🛡️ 去广告", "DIRECT"]
+    },
+    {
+      "tag": "👋 手动选择",
+      "type": "selector",
+      "outbounds": []
+    },
+    {
+      "tag": "♻️ 自动选择",
+      "type": "urltest",
+      "outbounds": [],
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
+    },
+    {
+      "tag": "📹 油管视频",
+      "type": "selector",
+      "outbounds": ["🛡️ 去广告", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+    },
+    {
+      "tag": "💬 ChatGPT",
+      "type": "selector",
+      "outbounds": ["🇨🇳 台湾负载", "👋 手动选择", "♻️ 自动选择", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+    },
+    {
+      "tag": "🎵 TikTok",
+      "type": "selector",
+      "outbounds": ["🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择"]
+    },
+    {
+      "tag": "📲 电报消息",
+      "type": "selector",
+      "outbounds": ["🇭🇰 香港负载", "🛡️ 去广告", "🚀 节点选择"]
+    },
+    {
+      "tag": "🍎 苹果服务",
+      "type": "selector",
+      "outbounds": ["DIRECT", "🚀 节点选择"]
+    },
+    {
+      "tag": "🏠 局域网",
+      "type": "selector",
+      "outbounds": ["DIRECT", "🚀 节点选择"]
+    },
+    {
+      "tag": "🇭🇰 香港负载",
+      "type": "urltest",
+      "outbounds": [],
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
+    },
+    {
+      "tag": "🇨🇳 台湾负载",
+      "type": "urltest",
+      "outbounds": [],
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
+    },
+    {
+      "tag": "🛡️ 去广告",
+      "type": "urltest",
+      "outbounds": [],
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
+    },
+    {
+      "tag": "🐟 漏网之鱼",
+      "type": "selector",
+      "outbounds": ["🚀 节点选择", "DIRECT"]
+    },
+    {
+      "tag": "DIRECT",
+      "type": "direct"
+    },
+    {
+      "tag": "REJECT",
+      "type": "block"
+    }
   ],
   "route": {
     "auto_detect_interface": true,
-    "default_domain_resolver": { "server": "local" },
+    "default_domain_resolver": {
+      "server": "local"
+    },
     "final": "🐟 漏网之鱼",
     "rule_set": [
-      { "tag": "geoip-cn", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs" },
-      { "tag": "geosite-cn", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs" },
-      { "tag": "ext-cn-domain", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/xmdhs/cn-domain-list/rule-set/ext-cn-list.srs" },
-      { "tag": "geosite-category-ads-all", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs" }
+      {
+        "tag": "geoip-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
+      },
+      {
+        "tag": "geosite-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs"
+      },
+      {
+        "tag": "ext-cn-domain",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/xmdhs/cn-domain-list/rule-set/ext-cn-list.srs"
+      },
+      {
+        "tag": "geosite-category-ads-all",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs"
+      }
     ],
     "rules": [
-      { "action": "sniff" },
-      { "action": "hijack-dns", "protocol": "dns" },
-      { "action": "resolve", "strategy": "prefer_ipv4" },
-      { "clash_mode": "direct", "outbound": "DIRECT" },
-      { "clash_mode": "global", "outbound": "🚀 节点选择" },
-      { "ip_is_private": true, "outbound": "DIRECT" },
-      { "rule_set": "geosite-category-ads-all", "outbound": "REJECT" },
-      { "domain_suffix": [".youtube.com",".ytimg.com",".googlevideo.com",".yt.be",".youtube-nocookie.com"], "outbound": "📹 油管视频" },
-      { "domain_suffix": [".openai.com",".chatgpt.com",".ai.com",".anthropic.com",".claude.ai",".gemini.google.com",".copilot.microsoft.com",".perplexity.ai",".deepseek.com",".moonshot.cn"], "outbound": "💬 ChatGPT" },
-      { "domain_suffix": [".tiktok.com",".tiktokv.com",".byteoversea.com",".bytedance.com",".douyin.com"], "outbound": "🎵 TikTok" },
-      { "domain_suffix": [".telegram.org",".telegram.me",".t.me",".tdlib.org",".telegra.ph"], "outbound": "📲 电报消息" },
-      { "domain_suffix": [".apple.com",".icloud.com",".mzstatic.com",".cdn-apple.com",".appstoreconnect.apple.com"], "outbound": "🍎 苹果服务" },
-      { "rule_set": "geosite-cn", "outbound": "DIRECT" },
-      { "rule_set": "ext-cn-domain", "outbound": "DIRECT" },
-      { "rule_set": "geoip-cn", "outbound": "DIRECT" }
+      {
+        "action": "sniff"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      },
+      {
+        "action": "resolve",
+        "strategy": "prefer_ipv4"
+      },
+      {
+        "clash_mode": "direct",
+        "outbound": "DIRECT"
+      },
+      {
+        "clash_mode": "global",
+        "outbound": "🚀 节点选择"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "DIRECT"
+      },
+      {
+        "rule_set": "geosite-category-ads-all",
+        "outbound": "REJECT"
+      },
+      {
+        "domain_suffix": [
+          ".youtube.com",
+          ".ytimg.com",
+          ".googlevideo.com",
+          ".yt.be",
+          ".youtube-nocookie.com"
+        ],
+        "outbound": "📹 油管视频"
+      },
+      {
+        "domain_suffix": [
+          ".openai.com",
+          ".chatgpt.com",
+          ".ai.com",
+          ".anthropic.com",
+          ".claude.ai",
+          ".gemini.google.com",
+          ".copilot.microsoft.com",
+          ".perplexity.ai",
+          ".deepseek.com",
+          ".moonshot.cn"
+        ],
+        "outbound": "💬 ChatGPT"
+      },
+      {
+        "domain_suffix": [
+          ".tiktok.com",
+          ".tiktokv.com",
+          ".byteoversea.com",
+          ".bytedance.com",
+          ".douyin.com"
+        ],
+        "outbound": "🎵 TikTok"
+      },
+      {
+        "domain_suffix": [
+          ".telegram.org",
+          ".telegram.me",
+          ".t.me",
+          ".tdlib.org",
+          ".telegra.ph"
+        ],
+        "outbound": "📲 电报消息"
+      },
+      {
+        "domain_suffix": [
+          ".apple.com",
+          ".icloud.com",
+          ".mzstatic.com",
+          ".cdn-apple.com",
+          ".appstoreconnect.apple.com"
+        ],
+        "outbound": "🍎 苹果服务"
+      },
+      {
+        "rule_set": "geosite-cn",
+        "outbound": "DIRECT"
+      },
+      {
+        "rule_set": "ext-cn-domain",
+        "outbound": "DIRECT"
+      },
+      {
+        "rule_set": "geoip-cn",
+        "outbound": "DIRECT"
+      }
     ]
   }
 }
