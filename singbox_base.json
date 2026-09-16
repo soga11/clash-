@@ -4,6 +4,7 @@
     "level": "warn",
     "timestamp": false
   },
+
   "dns": {
     "servers": [
       {
@@ -16,20 +17,9 @@
         "tag": "local",
         "type": "https",
         "server": "223.5.5.5"
-      },
-      {
-        "tag": "fakeip",
-        "type": "fakeip",
-        "inet4_range": "198.18.0.0/15",
-        "inet6_range": "2001:0470:f9da:fdfa::1/64"
       }
     ],
     "rules": [
-      {
-        "query_type": ["A", "AAAA"],
-        "rewrite_ttl": 1,
-        "server": "fakeip"
-      },
       {
         "clash_mode": "global",
         "server": "remote"
@@ -46,6 +36,7 @@
     "strategy": "prefer_ipv4",
     "final": "remote"
   },
+
   "experimental": {
     "cache_file": {
       "enabled": true
@@ -55,21 +46,8 @@
       "secret": ""
     }
   },
+
   "inbounds": [
-    {
-      "type": "direct",
-      "tag": "dns-in",
-      "listen": "0.0.0.0",
-      "listen_port": 1053
-    },
-    {
-      "type": "tun",
-      "tag": "tun-in",
-      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-      "auto_route": true,
-      "strict_route": true,
-      "mtu": 9000
-    },
     {
       "type": "mixed",
       "tag": "mixed-in",
@@ -77,11 +55,18 @@
       "listen_port": 2334
     }
   ],
+
   "outbounds": [
     {
       "tag": "🚀 节点选择",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "DIRECT"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "DIRECT"
+      ]
     },
     {
       "tag": "👋 手动选择",
@@ -99,17 +84,35 @@
     {
       "tag": "📹 油管视频",
       "type": "selector",
-      "outbounds": ["🛡️ 去广告", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🛡️ 去广告",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "💬 ChatGPT",
       "type": "selector",
-      "outbounds": ["🇨🇳 台湾负载", "👋 手动选择", "♻️ 自动选择", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🇨🇳 台湾负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "📲 电报消息",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "🚀 节点选择"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "🚀 节点选择"
+      ]
     },
     {
       "tag": "🇭🇰 香港负载",
@@ -138,7 +141,10 @@
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
-      "outbounds": ["🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "DIRECT",
@@ -149,12 +155,14 @@
       "type": "block"
     }
   ],
+
   "route": {
     "auto_detect_interface": true,
     "default_domain_resolver": {
       "server": "local"
     },
     "final": "🐟 漏网之鱼",
+
     "rule_set": [
       {
         "tag": "geoip-cn",
@@ -247,17 +255,10 @@
         }
       }
     ],
+
     "rules": [
       {
         "action": "sniff"
-      },
-      {
-        "action": "hijack-dns",
-        "protocol": "dns"
-      },
-      {
-        "action": "resolve",
-        "strategy": "prefer_ipv4"
       },
       {
         "clash_mode": "direct",
@@ -280,7 +281,11 @@
         "outbound": "📹 油管视频"
       },
       {
-        "rule_set": ["geosite-openai", "geosite-anthropic", "geosite-google-gemini"],
+        "rule_set": [
+          "geosite-openai",
+          "geosite-anthropic",
+          "geosite-google-gemini"
+        ],
         "outbound": "💬 ChatGPT"
       },
       {
