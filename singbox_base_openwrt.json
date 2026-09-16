@@ -16,12 +16,6 @@
         "tag": "local",
         "type": "https",
         "server": "223.5.5.5"
-      },
-      {
-        "tag": "fakeip",
-        "type": "fakeip",
-        "inet4_range": "198.18.0.0/15",
-        "inet6_range": "2001:0470:f9da:fdfa::1/64"
       }
     ],
     "rules": [
@@ -36,11 +30,6 @@
       {
         "rule_set": "geosite-cn",
         "server": "local"
-      },
-      {
-        "query_type": ["A", "AAAA"],
-        "rewrite_ttl": 1,
-        "server": "fakeip"
       }
     ],
     "strategy": "prefer_ipv4",
@@ -60,15 +49,19 @@
       "type": "direct",
       "tag": "dns-in",
       "listen": "0.0.0.0",
-      "listen_port": 1053
+      "listen_port": 6053
     },
     {
-      "type": "tun",
-      "tag": "tun-in",
-      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-      "auto_route": true,
-      "strict_route": true,
-      "mtu": 9000
+      "type": "redirect",
+      "tag": "redirect-in",
+      "listen": "::",
+      "listen_port": 6054
+    },
+    {
+      "type": "tproxy",
+      "tag": "tproxy-in",
+      "listen": "::",
+      "listen_port": 6055
     },
     {
       "type": "mixed",
@@ -81,7 +74,7 @@
     {
       "tag": "🚀 节点选择",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "DIRECT"]
+      "outbounds": ["♻️ 自动选择", "👋 手动选择", "🇭🇰 香港负载", "🇨🇳 台湾负载", "DIRECT"]
     },
     {
       "tag": "👋 手动选择",
@@ -237,8 +230,10 @@
         "action": "sniff"
       },
       {
-        "action": "hijack-dns",
-        "protocol": "dns"
+        "type": "logical",
+        "mode": "or",
+        "rules": [{ "port": 53 }, { "protocol": "dns" }],
+        "action": "hijack-dns"
       },
       {
         "action": "resolve",
