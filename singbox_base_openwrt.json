@@ -83,8 +83,7 @@
       "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
       "mtu": 9000,
       "auto_route": false,
-      "strict_route": false,
-      "dns_mode": "disabled"
+      "strict_route": false
     }
   ],
   "outbounds": [
@@ -172,7 +171,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-cn",
@@ -180,7 +181,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-category-ads-all",
@@ -188,7 +191,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-youtube",
@@ -196,7 +201,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/youtube.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-google",
@@ -204,7 +211,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-openai",
@@ -212,7 +221,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-anthropic",
@@ -220,7 +231,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/anthropic.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-google-gemini",
@@ -228,7 +241,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google-gemini.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-telegram",
@@ -236,7 +251,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/telegram.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       }
     ],
     "rules": [
