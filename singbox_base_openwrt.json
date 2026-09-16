@@ -124,6 +124,7 @@
       "tag": "🇭🇰 香港负载",
       "type": "urltest",
       "outbounds": [],
+      "filter": "香港|HK|HKG|Hong Kong",
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
@@ -132,6 +133,7 @@
       "tag": "🇨🇳 台湾负载",
       "type": "urltest",
       "outbounds": [],
+      "filter": "台湾|臺|TW|Taiwan|TPE",
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
@@ -140,6 +142,7 @@
       "tag": "🛡️ 去广告",
       "type": "urltest",
       "outbounds": [],
+      "filter": "去广告|广告|AdGuard",
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
