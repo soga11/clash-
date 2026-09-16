@@ -141,30 +141,33 @@
         "🚀 节点选择"
       ]
     },
-    {
-      "tag": "🇭🇰 香港负载",
-      "type": "urltest",
-      "outbounds": [电视],
-      "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "10m",
-      "tolerance": 30
-    },
-    {
-      "tag": "🇨🇳 台湾负载",
-      "type": "urltest",
-      "outbounds": [台湾],
-      "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "10m",
-      "tolerance": 30
-    },
-    {
-      "tag": "🛡️ 去广告",
-      "type": "urltest",
-      "outbounds": [去广告],
-      "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "10m",
-      "tolerance": 30
-    },
+   {
+  "tag": "🇭🇰 香港负载",
+  "type": "urltest",
+  "outbounds": [],
+  "filter": "电视",
+  "url": "http://cp.cloudflare.com/generate_204",
+  "interval": "10m",
+  "tolerance": 30
+},
+{
+  "tag": "🇨🇳 台湾负载",
+  "type": "urltest",
+  "outbounds": [],
+  "filter": "台湾",
+  "url": "http://cp.cloudflare.com/generate_204",
+  "interval": "10m",
+  "tolerance": 30
+},
+{
+  "tag": "🛡️ 去广告",
+  "type": "urltest",
+  "outbounds": [],
+  "filter": "去广告",
+  "url": "http://cp.cloudflare.com/generate_204",
+  "interval": "10m",
+  "tolerance": 30
+}
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
