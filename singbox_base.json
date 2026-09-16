@@ -44,11 +44,14 @@
       }
     ],
     "strategy": "prefer_ipv4",
-    "final": "remote"
+    "final": "remote",
+    "optimistic": true
   },
   "experimental": {
     "cache_file": {
-      "enabled": true
+      "enabled": true,
+      "store_dns": true,
+      "store_fakeip": true
     },
     "clash_api": {
       "external_controller": "127.0.0.1:9090",
