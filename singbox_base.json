@@ -1,6 +1,5 @@
 {
   "$schema": "https://sing-box.sagernet.org/schema.json",
-
   "log": {
     "level": "warn",
     "timestamp": false
@@ -100,11 +99,13 @@
         "DIRECT"
       ]
     },
+
     {
       "tag": "👋 手动选择",
       "type": "selector",
       "outbounds": []
     },
+
     {
       "tag": "♻️ 自动选择",
       "type": "urltest",
@@ -113,6 +114,7 @@
       "interval": "15m",
       "tolerance": 100
     },
+
     {
       "tag": "📹 油管视频",
       "type": "selector",
@@ -126,6 +128,7 @@
         "DIRECT"
       ]
     },
+
     {
       "tag": "💬 ChatGPT",
       "type": "selector",
@@ -138,6 +141,7 @@
         "DIRECT"
       ]
     },
+
     {
       "tag": "📲 电报消息",
       "type": "selector",
@@ -146,6 +150,7 @@
         "🚀 节点选择"
       ]
     },
+
     {
       "tag": "🇭🇰 香港负载",
       "type": "urltest",
@@ -155,6 +160,7 @@
       "interval": "15m",
       "tolerance": 100
     },
+
     {
       "tag": "🇨🇳 台湾负载",
       "type": "urltest",
@@ -164,6 +170,7 @@
       "interval": "15m",
       "tolerance": 100
     },
+
     {
       "tag": "🛡️ 去广告",
       "type": "urltest",
@@ -173,6 +180,7 @@
       "interval": "15m",
       "tolerance": 100
     },
+
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
@@ -181,10 +189,12 @@
         "DIRECT"
       ]
     },
+
     {
       "tag": "DIRECT",
       "type": "direct"
     },
+
     {
       "tag": "REJECT",
       "type": "block"
@@ -211,6 +221,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-cn",
         "type": "remote",
@@ -221,6 +232,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-category-ads-all",
         "type": "remote",
@@ -231,6 +243,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-youtube",
         "type": "remote",
@@ -241,6 +254,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-google",
         "type": "remote",
@@ -251,6 +265,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-openai",
         "type": "remote",
@@ -261,6 +276,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-anthropic",
         "type": "remote",
@@ -271,6 +287,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-google-gemini",
         "type": "remote",
@@ -281,6 +298,7 @@
           "detour": "🚀 节点选择"
         }
       },
+
       {
         "tag": "geosite-telegram",
         "type": "remote",
@@ -297,34 +315,42 @@
       {
         "action": "sniff"
       },
+
       {
         "action": "hijack-dns",
         "protocol": "dns"
       },
+
       {
         "action": "resolve",
         "strategy": "prefer_ipv4"
       },
+
       {
         "clash_mode": "direct",
         "outbound": "DIRECT"
       },
+
       {
         "clash_mode": "global",
         "outbound": "🚀 节点选择"
       },
+
       {
         "ip_is_private": true,
         "outbound": "DIRECT"
       },
+
       {
         "rule_set": "geosite-category-ads-all",
         "outbound": "REJECT"
       },
+
       {
         "rule_set": "geosite-youtube",
         "outbound": "📹 油管视频"
       },
+
       {
         "rule_set": [
           "geosite-openai",
@@ -333,30 +359,30 @@
         ],
         "outbound": "💬 ChatGPT"
       },
+
       {
         "domain_suffix": [
-          ".deepseek.com",
-          ".moonshot.cn",
-          ".kimi.moonshot.cn",
           ".perplexity.ai",
-          ".copilot.microsoft.com",
-          ".zhipuai.cn",
-          ".qwen.ai"
+          ".copilot.microsoft.com"
         ],
         "outbound": "💬 ChatGPT"
       },
+
       {
         "rule_set": "geosite-telegram",
         "outbound": "📲 电报消息"
       },
+
       {
         "rule_set": "geosite-google",
         "outbound": "🚀 节点选择"
       },
+
       {
         "rule_set": "geosite-cn",
         "outbound": "DIRECT"
       },
+
       {
         "rule_set": "geoip-cn",
         "outbound": "DIRECT"
