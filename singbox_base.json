@@ -1,9 +1,11 @@
 {
   "$schema": "https://sing-box.sagernet.org/schema.json",
+
   "log": {
     "level": "warn",
     "timestamp": false
   },
+
   "dns": {
     "servers": [
       {
@@ -14,16 +16,18 @@
       },
       {
         "tag": "local",
-        "type": "https",
-        "server": "223.5.5.5"
+        "type": "udp",
+        "server": "223.5.5.5",
+        "server_port": 53
       },
       {
         "tag": "fakeip",
         "type": "fakeip",
         "inet4_range": "198.18.0.0/15",
-        "inet6_range": "2001:0470:f9da:fdfa::1/64"
+        "inet6_range": "2001:470:f9da:fdfa::/64"
       }
     ],
+
     "rules": [
       {
         "clash_mode": "global",
@@ -38,15 +42,20 @@
         "server": "local"
       },
       {
-        "query_type": ["A", "AAAA"],
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
         "rewrite_ttl": 1,
         "server": "fakeip"
       }
     ],
+
     "strategy": "prefer_ipv4",
     "final": "remote",
     "optimistic": true
   },
+
   "experimental": {
     "cache_file": {
       "enabled": true,
@@ -58,11 +67,15 @@
       "secret": ""
     }
   },
+
   "inbounds": [
     {
       "type": "tun",
       "tag": "tun-in",
-      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
       "auto_route": true,
       "strict_route": true,
       "mtu": 9000
@@ -74,11 +87,18 @@
       "listen_port": 2334
     }
   ],
+
   "outbounds": [
     {
       "tag": "🚀 节点选择",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "DIRECT"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "DIRECT"
+      ]
     },
     {
       "tag": "👋 手动选择",
@@ -96,17 +116,35 @@
     {
       "tag": "📹 油管视频",
       "type": "selector",
-      "outbounds": ["🛡️ 去广告", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🛡️ 去广告",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "💬 ChatGPT",
       "type": "selector",
-      "outbounds": ["🇨🇳 台湾负载", "👋 手动选择", "♻️ 自动选择", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🇨🇳 台湾负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "📲 电报消息",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "🚀 节点选择"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "🚀 节点选择"
+      ]
     },
     {
       "tag": "🇭🇰 香港负载",
@@ -114,8 +152,8 @@
       "outbounds": [],
       "filter": "电视",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "10m",
-      "tolerance": 30
+      "interval": "15m",
+      "tolerance": 100
     },
     {
       "tag": "🇨🇳 台湾负载",
@@ -123,8 +161,8 @@
       "outbounds": [],
       "filter": "台湾",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "10m",
-      "tolerance": 30
+      "interval": "15m",
+      "tolerance": 100
     },
     {
       "tag": "🛡️ 去广告",
@@ -132,13 +170,16 @@
       "outbounds": [],
       "filter": "去广告",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "10m",
-      "tolerance": 30
+      "interval": "15m",
+      "tolerance": 100
     },
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
-      "outbounds": ["🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "DIRECT",
@@ -149,12 +190,16 @@
       "type": "block"
     }
   ],
+
   "route": {
     "auto_detect_interface": true,
+
     "default_domain_resolver": {
       "server": "local"
     },
+
     "final": "🐟 漏网之鱼",
+
     "rule_set": [
       {
         "tag": "geoip-cn",
@@ -247,6 +292,7 @@
         }
       }
     ],
+
     "rules": [
       {
         "action": "sniff"
@@ -280,7 +326,11 @@
         "outbound": "📹 油管视频"
       },
       {
-        "rule_set": ["geosite-openai", "geosite-anthropic", "geosite-google-gemini"],
+        "rule_set": [
+          "geosite-openai",
+          "geosite-anthropic",
+          "geosite-google-gemini"
+        ],
         "outbound": "💬 ChatGPT"
       },
       {
