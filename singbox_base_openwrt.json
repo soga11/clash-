@@ -1,54 +1,81 @@
 {
   "$schema": "https://sing-box.sagernet.org/schema.json",
   "log": {
-    "level": "warn",
-    "timestamp": false
+    "level": "info",
+    "timestamp": true
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "cache.db",
+      "store_fakeip": true,
+      "store_dns": true
+    }
   },
   "dns": {
     "servers": [
       {
-        "tag": "remote",
-        "type": "https",
+        "tag": "Local-DNS",
+        "type": "tls",
+        "server": "223.5.5.5",
+        "server_port": 853
+      },
+      {
+        "tag": "Remote-DNS",
+        "type": "tls",
         "server": "8.8.8.8",
+        "server_port": 853,
         "detour": "🚀 节点选择"
       },
       {
-        "tag": "local",
-        "type": "https",
-        "server": "223.5.5.5"
+        "tag": "fake-ip-dns-server",
+        "type": "fakeip",
+        "inet4_range": "198.18.0.0/15",
+        "inet6_range": "fc00::/18"
       }
     ],
     "rules": [
       {
-        "clash_mode": "global",
-        "server": "remote"
+        "query_type": [
+          "HTTPS",
+          "SVCB"
+        ],
+        "action": "reject"
       },
       {
         "clash_mode": "direct",
-        "server": "local"
+        "action": "route",
+        "server": "Local-DNS"
+      },
+      {
+        "clash_mode": "global",
+        "action": "route",
+        "server": "Remote-DNS"
       },
       {
         "rule_set": "geosite-cn",
-        "server": "local"
+        "action": "route",
+        "server": "Local-DNS"
+      },
+      {
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
+        "action": "route",
+        "server": "fake-ip-dns-server",
+        "rewrite_ttl": 1
       }
     ],
     "strategy": "prefer_ipv4",
-    "final": "remote"
-  },
-  "experimental": {
-    "cache_file": {
-      "enabled": true
-    },
-    "clash_api": {
-      "external_controller": "127.0.0.1:9090",
-      "secret": ""
-    }
+    "final": "Remote-DNS",
+    "reverse_mapping": true
   },
   "inbounds": [
     {
       "type": "direct",
       "tag": "dns-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 6053
     },
     {
@@ -64,17 +91,31 @@
       "listen_port": 6055
     },
     {
-      "type": "mixed",
-      "tag": "mixed-in",
-      "listen": "127.0.0.1",
-      "listen_port": 2334
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singtun0",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 9000,
+      "auto_route": false,
+      "strict_route": false,
+      "dns_mode": "disabled"
     }
   ],
   "outbounds": [
     {
       "tag": "🚀 节点选择",
       "type": "selector",
-      "outbounds": ["♻️ 自动选择", "👋 手动选择", "🇭🇰 香港负载", "🇨🇳 台湾负载", "DIRECT"]
+      "outbounds": [
+        "♻️ 自动选择",
+        "👋 手动选择",
+        "🇭🇰 香港负载",
+        "🇨🇳 台湾负载",
+        "🛡️ 去广告",
+        "DIRECT"
+      ]
     },
     {
       "tag": "👋 手动选择",
@@ -92,17 +133,35 @@
     {
       "tag": "📹 油管视频",
       "type": "selector",
-      "outbounds": ["🛡️ 去广告", "👋 手动选择", "♻️ 自动选择", "🇨🇳 台湾负载", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🛡️ 去广告",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "💬 ChatGPT",
       "type": "selector",
-      "outbounds": ["🇨🇳 台湾负载", "👋 手动选择", "♻️ 自动选择", "🇭🇰 香港负载", "🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🇨🇳 台湾负载",
+        "👋 手动选择",
+        "♻️ 自动选择",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "📲 电报消息",
       "type": "selector",
-      "outbounds": ["🇭🇰 香港负载", "🚀 节点选择"]
+      "outbounds": [
+        "🇭🇰 香港负载",
+        "🚀 节点选择"
+      ]
     },
     {
       "tag": "🇭🇰 香港负载",
@@ -134,7 +193,10 @@
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
-      "outbounds": ["🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "DIRECT",
@@ -148,7 +210,7 @@
   "route": {
     "auto_detect_interface": true,
     "default_domain_resolver": {
-      "server": "local"
+      "server": "Local-DNS"
     },
     "final": "🐟 漏网之鱼",
     "rule_set": [
@@ -158,7 +220,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-cn",
@@ -166,7 +230,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-category-ads-all",
@@ -174,7 +240,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-youtube",
@@ -182,7 +250,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/youtube.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-google",
@@ -190,7 +260,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-openai",
@@ -198,7 +270,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-anthropic",
@@ -206,7 +280,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/anthropic.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-google-gemini",
@@ -214,7 +290,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google-gemini.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-telegram",
@@ -222,17 +300,32 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/telegram.srs",
         "update_interval": "24h",
-        "download_detour": "🚀 节点选择"
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       }
     ],
     "rules": [
       {
-        "action": "sniff"
+        "action": "sniff",
+        "inbound": [
+          "dns-in",
+          "redirect-in",
+          "tproxy-in",
+          "tun-in"
+        ]
       },
       {
         "type": "logical",
         "mode": "or",
-        "rules": [{ "port": 53 }, { "protocol": "dns" }],
+        "rules": [
+          {
+            "port": 53
+          },
+          {
+            "protocol": "dns"
+          }
+        ],
         "action": "hijack-dns"
       },
       {
@@ -241,26 +334,35 @@
       },
       {
         "clash_mode": "direct",
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "clash_mode": "global",
+        "action": "route",
         "outbound": "🚀 节点选择"
       },
       {
         "ip_is_private": true,
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "rule_set": "geosite-category-ads-all",
-        "outbound": "REJECT"
+        "action": "reject"
       },
       {
         "rule_set": "geosite-youtube",
+        "action": "route",
         "outbound": "📹 油管视频"
       },
       {
-        "rule_set": ["geosite-openai", "geosite-anthropic", "geosite-google-gemini"],
+        "rule_set": [
+          "geosite-openai",
+          "geosite-anthropic",
+          "geosite-google-gemini"
+        ],
+        "action": "route",
         "outbound": "💬 ChatGPT"
       },
       {
@@ -273,22 +375,27 @@
           ".zhipuai.cn",
           ".qwen.ai"
         ],
+        "action": "route",
         "outbound": "💬 ChatGPT"
       },
       {
         "rule_set": "geosite-telegram",
+        "action": "route",
         "outbound": "📲 电报消息"
       },
       {
         "rule_set": "geosite-google",
+        "action": "route",
         "outbound": "🚀 节点选择"
       },
       {
         "rule_set": "geosite-cn",
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "rule_set": "geoip-cn",
+        "action": "route",
         "outbound": "DIRECT"
       }
     ]
