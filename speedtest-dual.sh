@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================
-#  speedtest-dual.sh  v3.0   (IPv4 + IPv6 双栈测速)
-#  - 自动检测 v4/v6，两个都测（无 v6 自动跳过）
-#  - 自动最佳 / 指定地区(广西 广东…) / 三网(电信 联通 移动)
-#  - 已修复 -I 绑定报错：改用 -4 / -6 选族
+#  speedtest-dual.sh  v3.1   (IPv4 + IPv6 双栈测速)
+#  流程: ①先测"最近节点"v4+v6(反映本机地区) ②再测指定地区(广西/广东)
+#  修复: 去掉非法的 --progress=no
 #  用法:
-#    bash speedtest-dual.sh                  # 自动(v4+v6)
-#    bash speedtest-dual.sh -r 广东 -3        # 广东三网
-#    bash speedtest-dual.sh -r 广西 -3 -6     # 广西三网(只 v6)
-#    bash speedtest-dual.sh -l                # 列出候选服务器
-#    bash speedtest-dual.sh -s 12345          # 指定服务器 ID
+#    bash speedtest-dual.sh                     # 只测最近(v4+v6)
+#    bash speedtest-dual.sh -r 广东 -3           # 最近 + 广东三网
+#    bash speedtest-dual.sh -r 广西 -3 -6        # 只 v6
+#    bash speedtest-dual.sh -l                   # 列候选服务器
+#    bash speedtest-dual.sh -s 12345             # 指定服务器ID
 # ============================================================
 set -u
 RED='\033[0;31m';GREEN='\033[0;32m';YELLOW='\033[1;33m';BLUE='\033[0;34m';CYAN='\033[0;36m';BOLD='\033[1m';NC='\033[0m'
@@ -56,11 +55,10 @@ ensure_speedtest(){
 }
 
 # ---------- JSON 解析: jq > python3 > sed ----------
-json_get(){ # $1=json  $2=path(e.g. download.bandwidth)
+json_get(){ # $1=json  $2=path
   local j="$1" p="$2" js
   js="$(printf '%s\n' "$j" | grep -E '^\{')"; [ -z "$js" ] && js="$j"
-  if have jq; then
-    printf '%s\n' "$js" | jq -r "select(.type==\"result\")|.$p // empty" 2>/dev/null | tail -1; return; fi
+  if have jq; then printf '%s\n' "$js" | jq -r "select(.type==\"result\")|.$p // empty" 2>/dev/null | tail -1; return; fi
   if have python3; then
     printf '%s' "$js" | python3 -c '
 import json,sys
@@ -107,14 +105,16 @@ isp_regex(){ case "$1" in
 list_servers(){ "$SPEEDTEST" -L --accept-license --accept-gdpr 2>/dev/null; }
 find_server(){ awk -v r="$2" -v p="$3" '{L=tolower($0)} $1 ~ /^[0-9]+$/ && L ~ r && L ~ p {print $1; exit}' <<<"$1"; }
 
-# ---------- 跑一个测试 ----------
+# ---------- 跑一个测试（关键修复：用 -f json，去掉 --progress）----------
 run_test(){ # $1=fam(4|6)  $2=sid  $3=label
   local fam="$1" sid="$2" label="$3"
-  local -a args=("-$fam" --accept-license --accept-gdpr --format=json --progress=no)
+  local -a args=("-$fam" --accept-license --accept-gdpr -f json)
   [ -n "$sid" ] && args+=(-s "$sid")
   info "$label 测速中…"
   local out; out="$("$SPEEDTEST" "${args[@]}" 2>/dev/null)"
   if [ -z "$out" ]; then warn "$label 失败（无输出）"; return 1; fi
+  if printf '%s' "$out" | grep -q 'official command line client'; then
+    warn "$label: 参数不被支持 → 请运行  $SPEEDTEST -h  查看可用参数"; return 1; fi
   local dl ul pg sv
   dl="$(json_get "$out" download.bandwidth)"
   ul="$(json_get "$out" upload.bandwidth)"
@@ -131,25 +131,30 @@ run_test(){ # $1=fam(4|6)  $2=sid  $3=label
 run_family(){ # $1=fam
   local fam="$1"; printf '\n%b===== IPv%s 测速 =====%b\n' "$BOLD" "$fam" "$NC"
   if [ "$fam" = 6 ] && [ "$V6OK" -ne 1 ]; then warn "IPv6 不可用，跳过"; return 0; fi
-  [ -n "$SERVER_ID" ] && { run_test "$fam" "$SERVER_ID" "服务器$SERVER_ID"; return; }
-  if [ -z "$REGION" ] || [ "$REGION" = auto ]; then run_test "$fam" "" "自动最佳"; return; fi
-  local servers rx; servers="$(list_servers)"
-  [ -z "$servers" ] && { warn "IPv$fam 获取服务器列表失败"; return 1; }
-  rx="$(region_regex "$REGION")"
-  if [ "$THREE" -eq 1 ]; then
-    local isp sid
-    for isp in 电信 联通 移动; do
-      sid="$(find_server "$servers" "$rx" "$(isp_regex "$isp")")"
-      if [ -n "$sid" ]; then run_test "$fam" "$sid" "${REGION}${isp}"; else warn "IPv$fam: 未找到 ${REGION}${isp}"; fi
-    done
-  else
-    local sid; sid="$(find_server "$servers" "$rx" "")"
-    if [ -n "$sid" ]; then run_test "$fam" "$sid" "$REGION"; else warn "IPv$fam: 未找到 $REGION（可用 -l 查看）"; fi
+
+  # ① 最近节点（本机在哪，就测哪：HK→HK，SG→SG）
+  if [ -n "$SERVER_ID" ]; then run_test "$fam" "$SERVER_ID" "指定服务器"
+  else run_test "$fam" "" "最近节点"; fi
+
+  # ② 指定地区
+  if [ -n "$REGION" ] && [ "$REGION" != auto ]; then
+    local servers rx; servers="$(list_servers)"
+    [ -z "$servers" ] && { warn "IPv$fam 获取服务器列表失败"; return 1; }
+    rx="$(region_regex "$REGION")"
+    if [ "$THREE" -eq 1 ]; then
+      local isp sid
+      for isp in 电信 联通 移动; do
+        sid="$(find_server "$servers" "$rx" "$(isp_regex "$isp")")"
+        if [ -n "$sid" ]; then run_test "$fam" "$sid" "${REGION}${isp}"; else warn "IPv$fam: 未找到 ${REGION}${isp}"; fi
+      done
+    else
+      local sid; sid="$(find_server "$servers" "$rx" "")"
+      if [ -n "$sid" ]; then run_test "$fam" "$sid" "$REGION"; else warn "IPv$fam: 未找到 $REGION（-l 查看）"; fi
+    fi
   fi
 }
 
 # ---------- 参数 / 主流程 ----------
-usage(){ sed -n '3,14p' "$0"; }
 REGION=""; THREE=0; SERVER_ID=""; FAMILY=both; LIST_ONLY=0
 while [ $# -gt 0 ]; do case "$1" in
   -r|--region) REGION="${2:-}"; shift 2;;
@@ -158,7 +163,7 @@ while [ $# -gt 0 ]; do case "$1" in
   -6|--v6)     FAMILY=6; shift;;
   -l|--list)   LIST_ONLY=1; shift;;
   -s|--server) SERVER_ID="${2:-}"; shift 2;;
-  -h|--help)   usage; exit 0;;
+  -h|--help)   sed -n '2,12p' "$0"; exit 0;;
   *) REGION="$1"; shift;;
 esac; done
 
@@ -170,7 +175,7 @@ printf '%b================================================%b\n' "$CYAN" "$NC"
 printf ' IPv4 : %s\n' "${IPV4:-无}"
 printf ' IPv6 : %s\n' "${IPV6:-无}"
 if [ "$V6OK" -eq 1 ]; then ok "IPv6 可用 → 一并测试"; else warn "IPv6 不可用 → 跳过"; fi
-printf ' 地区 : %s    模式: %s\n' "${REGION:-自动(最近)}" "$([ "$THREE" -eq 1 ] && echo 三网 || echo 单测)"
+printf ' 地区 : %s   模式: %s\n' "${REGION:-仅最近节点}" "$([ "$THREE" -eq 1 ] && echo 三网 || echo 单测)"
 printf '%b================================================%b\n' "$CYAN" "$NC"
 
 case "$FAMILY" in
