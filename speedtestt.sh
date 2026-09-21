@@ -145,6 +145,7 @@ isp_regex() {
 list_servers() {
   local bind=$1
   "$SPEEDTEST" -I "$bind" -L --accept-license --accept-gdpr 2>/dev/null
+  "$SPEEDTEST" -i "$bind" -L --accept-license --accept-gdpr 2>/dev/null
 }
 
 find_server() {
@@ -168,7 +169,9 @@ json_number() {
 
 run_test() {
   local bind=$1 label=$2 sid=${3:-} output rc down up ping
+  # Ookla: -i/--ip 绑定源 IP；-I/--interface 绑定网卡名。
   local args=(-I "$bind" --accept-license --accept-gdpr --format=json --progress=no)
+  local args=(-i "$bind" --accept-license --accept-gdpr --format=json --progress=no)
   [[ -z $sid ]] || args+=(-s "$sid")
   info "$label 测速中…"
   output=$("$SPEEDTEST" "${args[@]}" 2>&1); rc=$?
