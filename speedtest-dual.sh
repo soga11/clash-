@@ -122,6 +122,8 @@ route_ip() {
   if [[ -z $out ]]; then
     out=$(ip "-$family" -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')
   fi
+  # 不回退到“任意全局地址”：有 IPv6 地址不代表存在 IPv6 默认路由。
+  # 只有 route get 真正选出源地址时，才认为该协议族可用。
   printf '%s' "$out"
 }
 
@@ -156,14 +158,24 @@ find_server() {
 json_number() {
   local json=$1 path=$2
   if command -v jq >/dev/null 2>&1; then jq -r ".$path // empty" <<<"$json"; return; fi
+  local json=$1 path=$2 result_json
+  # 首次运行可能先输出 EULA 文本和多条 log JSON；只取最后的 result JSON。
+  result_json=$(printf '%s\n' "$json" | awk '/^\{.*"type":"result"/{line=$0} END{print line}')
+  [[ -n $result_json ]] || result_json=$(printf '%s\n' "$json" | awk '/^\{.*"download"/{line=$0} END{print line}')
+  [[ -n $result_json ]] || result_json=$json
+  if command -v jq >/dev/null 2>&1; then jq -r ".$path // empty" <<<"$result_json"; return; fi
   if command -v python3 >/dev/null 2>&1; then
     JSON_INPUT=$json python3 -c 'import json,os,sys; v=json.loads(os.environ["JSON_INPUT"]); [v:=v.get(k,{}) for k in sys.argv[1].split(".")]; print(v if isinstance(v,(int,float,str)) else "")' "$path" 2>/dev/null
+    JSON_INPUT=$result_json python3 -c 'import json,os,sys; v=json.loads(os.environ["JSON_INPUT"]); [v:=v.get(k,{}) for k in sys.argv[1].split(".")]; print(v if isinstance(v,(int,float,str)) else "")' "$path" 2>/dev/null
     return
   fi
   case $path in
     download.bandwidth) sed -nE 's/.*"download":\{[^}]*"bandwidth":([0-9.]+).*/\1/p' <<<"$json" ;;
     upload.bandwidth) sed -nE 's/.*"upload":\{[^}]*"bandwidth":([0-9.]+).*/\1/p' <<<"$json" ;;
     ping.latency) sed -nE 's/.*"ping":\{[^}]*"latency":([0-9.]+).*/\1/p' <<<"$json" ;;
+    download.bandwidth) sed -nE 's/.*"download":\{[^}]*"bandwidth":([0-9.]+).*/\1/p' <<<"$result_json" ;;
+    upload.bandwidth) sed -nE 's/.*"upload":\{[^}]*"bandwidth":([0-9.]+).*/\1/p' <<<"$result_json" ;;
+    ping.latency) sed -nE 's/.*"ping":\{[^}]*"latency":([0-9.]+).*/\1/p' <<<"$result_json" ;;
   esac
 }
 
