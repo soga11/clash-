@@ -1,3 +1,131 @@
+#!/usr/bin/env bash
+# VPS 三网测速 v3.0
+# 依赖: bash, curl/wget, tar。优先使用已安装的 Ookla Speedtest CLI。
+
+set -uo pipefail
+
+VERSION="3.0.0"
+OOKLA_VERSION="1.2.0"
+REGION=""
+THREE=0
+FAMILY="both"
+SERVER_ID=""
+LIST_ONLY=0
+COLOR=1
+SPEEDTEST=""
+WORKDIR=""
+IPV4=""
+IPV6=""
+
+if [[ ! -t 1 || "${NO_COLOR:-}" != "" ]]; then COLOR=0; fi
+if (( COLOR )); then
+  RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+  BLUE=$'\033[0;34m'; CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+else
+  RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""; BOLD=""; NC=""
+fi
+
+info() { printf '%b[*]%b %s\n' "$BLUE" "$NC" "$*"; }
+ok()   { printf '%b[+]%b %s\n' "$GREEN" "$NC" "$*"; }
+warn() { printf '%b[!]%b %s\n' "$YELLOW" "$NC" "$*" >&2; }
+err()  { printf '%b[-]%b %s\n' "$RED" "$NC" "$*" >&2; }
+die()  { err "$*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+用法: speedtest.sh [选项]
+
+  -r, --region <地区>   从 Ookla 返回的候选节点中匹配城市/省份
+  -3, --three           分别测试电信、联通、移动（需要与 -r 同用）
+  -4, --ipv4            只测 IPv4
+  -6, --ipv6            只测 IPv6
+  -s, --server <ID>     指定 Ookla 服务器 ID（最稳定的指定方式）
+  -l, --list            列出 Ookla 候选服务器后退出
+      --no-color        关闭颜色
+  -h, --help            显示帮助
+  -V, --version         显示版本
+
+示例:
+  bash speedtest.sh
+  bash speedtest.sh -r 广东 -3 -4
+  bash speedtest.sh -s 12345 -6
+
+说明: Ookla CLI 只返回附近的候选服务器；远程地区可能搜不到，此时请用 -s ID。
+EOF
+}
+
+need_arg() { [[ $# -ge 2 && -n "$2" ]] || die "选项 $1 需要参数"; }
+while (($#)); do
+  case "$1" in
+    -r|--region) need_arg "$@"; REGION=$2; shift 2 ;;
+    -s|--server) need_arg "$@"; [[ $2 =~ ^[0-9]+$ ]] || die "服务器 ID 必须是数字"; SERVER_ID=$2; shift 2 ;;
+    -3|--three) THREE=1; shift ;;
+    -4|--ipv4) FAMILY="4"; shift ;;
+    -6|--ipv6) FAMILY="6"; shift ;;
+    -l|--list) LIST_ONLY=1; shift ;;
+    --no-color) COLOR=0; RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""; BOLD=""; NC=""; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -V|--version) echo "$VERSION"; exit 0 ;;
+    --) shift; break ;;
+    -*) die "未知选项: $1（用 -h 查看帮助）" ;;
+    *) [[ -z $REGION ]] || die "多余参数: $1"; REGION=$1; shift ;;
+  esac
+done
+[[ $# -eq 0 ]] || die "多余参数: $*"
+(( THREE == 0 )) || [[ -n $REGION ]] || die "-3/--three 需要同时指定 -r/--region"
+(( THREE == 0 )) || [[ -z $SERVER_ID ]] || die "-3 与 -s 不能同时使用"
+
+cleanup() { [[ -z $WORKDIR ]] || rm -rf -- "$WORKDIR"; }
+WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/speedtest-cn.XXXXXXXX") || die "无法创建临时目录"
+trap cleanup EXIT HUP INT TERM
+
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120 --retry 2 -o "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q --timeout=20 --tries=3 -O "$2" "$1"
+  else
+    return 127
+  fi
+}
+
+ookla_arch() {
+  case $(uname -m 2>/dev/null) in
+    x86_64|amd64) echo x86_64 ;; aarch64|arm64) echo aarch64 ;;
+    armv7l|armv7|armhf) echo armhf ;; i386|i486|i586|i686) echo i386 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_ookla() { "$1" --version 2>&1 | grep -qi 'Speedtest by Ookla'; }
+ensure_speedtest() {
+  local candidate arch archive url
+  candidate=$(command -v speedtest 2>/dev/null || true)
+  if [[ -n $candidate ]] && is_ookla "$candidate"; then SPEEDTEST=$candidate; return; fi
+  [[ -z $candidate ]] || warn "已安装的 speedtest 不是 Ookla 版，将使用临时官方版"
+  arch=$(ookla_arch) || die "Ookla 不支持当前架构: $(uname -m)"
+  command -v tar >/dev/null 2>&1 || die "缺少 tar"
+  archive="$WORKDIR/ookla.tgz"
+  url="https://install.speedtest.net/app/cli/ookla-speedtest-${OOKLA_VERSION}-linux-${arch}.tgz"
+  info "下载 Ookla Speedtest CLI ${OOKLA_VERSION} (${arch})"
+  fetch "$url" "$archive" || die "下载 Ookla Speedtest CLI 失败"
+  tar -xzf "$archive" -C "$WORKDIR" || die "解压 Ookla Speedtest CLI 失败"
+  SPEEDTEST="$WORKDIR/speedtest"
+  [[ -f $SPEEDTEST ]] || die "压缩包中没有 speedtest 可执行文件"
+  chmod 700 "$SPEEDTEST" || die "无法设置执行权限"
+}
+
+route_ip() {
+  local family=$1 target out
+  if [[ $family == 4 ]]; then target=1.1.1.1; else target=2606:4700:4700::1111; fi
+  out=$(ip "-$family" route get "$target" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+  if [[ -z $out ]]; then
+    out=$(ip "-$family" -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')
+  fi
+  printf '%s' "$out"
+}
+
+region_regex() {
   case ${1,,} in
     广西|guangxi|gx) echo 'Guangxi|Nanning|Guilin|Liuzhou|Beihai|Wuzhou|Yulin|Qinzhou|Baise|Hezhou|Hechi|Laibin|Chongzuo|Guigang|Fangchenggang|广西|南宁|桂林|柳州' ;;
     广东|guangdong|gd) echo 'Guangdong|Guangzhou|Shenzhen|Dongguan|Foshan|Zhuhai|Zhongshan|Huizhou|Shantou|Jiangmen|Zhanjiang|广东|广州|深圳|东莞|佛山' ;;
