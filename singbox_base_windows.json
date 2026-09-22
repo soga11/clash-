@@ -81,36 +81,22 @@
       "type": "selector",
       "outbounds": [
         "🇭🇰 香港负载",
-        "👋 手动选择",
-        "♻️ 自动选择",
         "🇨🇳 台湾负载",
+        "jj",
+        "🛡️ 去广告",
+        "👋 手动选择",
         "DIRECT"
       ]
-    },
-    {
-      "tag": "👋 手动选择",
-      "type": "selector",
-      "outbounds": []
-    },
-    {
-      "tag": "♻️ 自动选择",
-      "type": "urltest",
-      "outbounds": [],
-      "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
-      "tolerance": 100
     },
     {
       "tag": "📹 油管视频",
       "type": "selector",
       "outbounds": [
         "🛡️ 去广告",
-        "👋 手动选择",
-        "♻️ 自动选择",
         "🇨🇳 台湾负载",
         "🇭🇰 香港负载",
         "🚀 节点选择",
-        "DIRECT"
+        "👋 手动选择"
       ]
     },
     {
@@ -118,11 +104,21 @@
       "type": "selector",
       "outbounds": [
         "🇨🇳 台湾负载",
-        "👋 手动选择",
-        "♻️ 自动选择",
+        "jj",
         "🇭🇰 香港负载",
         "🚀 节点选择",
-        "DIRECT"
+        "👋 手动选择"
+      ]
+    },
+    {
+      "tag": "📱 社交媒体",
+      "type": "selector",
+      "outbounds": [
+        "jj",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "👋 手动选择"
       ]
     },
     {
@@ -130,14 +126,35 @@
       "type": "selector",
       "outbounds": [
         "🇭🇰 香港负载",
+        "🛡️ 去广告",
+        "🚀 节点选择",
+        "👋 手动选择"
+      ]
+    },
+    {
+      "tag": "🍎 苹果服务",
+      "type": "selector",
+      "outbounds": [
+        "DIRECT",
         "🚀 节点选择"
+      ]
+    },
+    {
+      "tag": "👋 手动选择",
+      "type": "selector",
+      "outbounds": [
+        "TW-jj",
+        "TW-1",
+        "HK-1",
+        "AD-1"
       ]
     },
     {
       "tag": "🇭🇰 香港负载",
       "type": "urltest",
-      "outbounds": [],
-      "filter": "电视",
+      "outbounds": [
+        "HK-1"
+      ],
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
@@ -145,8 +162,19 @@
     {
       "tag": "🇨🇳 台湾负载",
       "type": "urltest",
-      "outbounds": [],
-      "filter": "台湾",
+      "outbounds": [
+        "TW-1"
+      ],
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
+    },
+    {
+      "tag": "jj",
+      "type": "urltest",
+      "outbounds": [
+        "TW-jj"
+      ],
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
@@ -154,8 +182,9 @@
     {
       "tag": "🛡️ 去广告",
       "type": "urltest",
-      "outbounds": [],
-      "filter": "去广告",
+      "outbounds": [
+        "AD-1"
+      ],
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
@@ -168,13 +197,54 @@
         "DIRECT"
       ]
     },
+
+    {
+      "tag": "TW-jj",
+      "type": "hysteria2",
+      "server": "YOUR_TW_HINET_SERVER",
+      "server_port": 443,
+      "password": "YOUR_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "YOUR_SNI"
+      }
+    },
+    {
+      "tag": "TW-1",
+      "type": "hysteria2",
+      "server": "YOUR_TW_SERVER",
+      "server_port": 443,
+      "password": "YOUR_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "YOUR_SNI"
+      }
+    },
+    {
+      "tag": "HK-1",
+      "type": "hysteria2",
+      "server": "YOUR_HK_SERVER",
+      "server_port": 443,
+      "password": "YOUR_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "YOUR_SNI"
+      }
+    },
+    {
+      "tag": "AD-1",
+      "type": "hysteria2",
+      "server": "YOUR_AD_SERVER",
+      "server_port": 443,
+      "password": "YOUR_PASSWORD",
+      "tls": {
+        "enabled": true,
+        "server_name": "YOUR_SNI"
+      }
+    },
     {
       "tag": "DIRECT",
       "type": "direct"
-    },
-    {
-      "tag": "REJECT",
-      "type": "block"
     }
   ],
   "route": {
@@ -273,6 +343,46 @@
         "http_client": {
           "detour": "🚀 节点选择"
         }
+      },
+      {
+        "tag": "geosite-facebook",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/facebook.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
+      },
+      {
+        "tag": "geosite-instagram",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/instagram.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
+      },
+      {
+        "tag": "geosite-tiktok",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/tiktok.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
+      },
+      {
+        "tag": "geosite-apple",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/apple.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       }
     ],
     "rules": [
@@ -289,32 +399,37 @@
       },
       {
         "clash_mode": "direct",
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "clash_mode": "global",
+        "action": "route",
         "outbound": "🚀 节点选择"
       },
       {
         "ip_is_private": true,
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "rule_set": "geosite-category-ads-all",
-        "outbound": "REJECT"
+        "action": "reject"
       },
       {
         "domain_suffix": [
-          ".deepseek.com",
-          ".moonshot.cn",
-          ".kimi.moonshot.cn",
-          ".zhipuai.cn",
-          ".qwen.ai"
+          "deepseek.com",
+          "moonshot.cn",
+          "kimi.moonshot.cn",
+          "zhipuai.cn",
+          "qwen.ai"
         ],
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "rule_set": "geosite-youtube",
+        "action": "route",
         "outbound": "📹 油管视频"
       },
       {
@@ -323,29 +438,49 @@
           "geosite-anthropic",
           "geosite-google-gemini"
         ],
+        "action": "route",
         "outbound": "💬 ChatGPT"
       },
       {
         "domain_suffix": [
-          ".perplexity.ai",
-          ".copilot.microsoft.com"
+          "perplexity.ai",
+          "copilot.microsoft.com"
         ],
+        "action": "route",
         "outbound": "💬 ChatGPT"
       },
       {
+        "rule_set": [
+          "geosite-facebook",
+          "geosite-instagram",
+          "geosite-tiktok"
+        ],
+        "action": "route",
+        "outbound": "📱 社交媒体"
+      },
+      {
         "rule_set": "geosite-telegram",
+        "action": "route",
         "outbound": "📲 电报消息"
       },
       {
         "rule_set": "geosite-google",
+        "action": "route",
         "outbound": "🚀 节点选择"
       },
       {
+        "rule_set": "geosite-apple",
+        "action": "route",
+        "outbound": "🍎 苹果服务"
+      },
+      {
         "rule_set": "geosite-cn",
+        "action": "route",
         "outbound": "DIRECT"
       },
       {
         "rule_set": "geoip-cn",
+        "action": "route",
         "outbound": "DIRECT"
       }
     ]
