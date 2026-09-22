@@ -82,8 +82,8 @@
       "outbounds": [
         "🇭🇰 香港负载",
         "👋 手动选择",
-        "♻️ 自动选择",
         "🇨🇳 台湾负载",
+        "jj",
         "DIRECT"
       ]
     },
@@ -93,20 +93,11 @@
       "outbounds": []
     },
     {
-      "tag": "♻️ 自动选择",
-      "type": "urltest",
-      "outbounds": [],
-      "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
-      "tolerance": 100
-    },
-    {
       "tag": "📹 油管视频",
       "type": "selector",
       "outbounds": [
         "🛡️ 去广告",
         "👋 手动选择",
-        "♻️ 自动选择",
         "🇨🇳 台湾负载",
         "🇭🇰 香港负载",
         "🚀 节点选择",
@@ -118,10 +109,22 @@
       "type": "selector",
       "outbounds": [
         "🇨🇳 台湾负载",
+        "jj",
         "👋 手动选择",
-        "♻️ 自动选择",
         "🇭🇰 香港负载",
         "🚀 节点选择",
+        "DIRECT"
+      ]
+    },
+    {
+      "tag": "📱 社交媒体",
+      "type": "selector",
+      "outbounds": [
+        "jj",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "👋 手动选择",
         "DIRECT"
       ]
     },
@@ -147,6 +150,15 @@
       "type": "urltest",
       "outbounds": [],
       "filter": "台湾",
+      "url": "http://cp.cloudflare.com/generate_204",
+      "interval": "15m",
+      "tolerance": 100
+    },
+    {
+      "tag": "jj",
+      "type": "urltest",
+      "outbounds": [],
+      "filter": "jj",
       "url": "http://cp.cloudflare.com/generate_204",
       "interval": "15m",
       "tolerance": 100
@@ -273,6 +285,36 @@
         "http_client": {
           "detour": "🚀 节点选择"
         }
+      },
+      {
+        "tag": "geosite-facebook",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/facebook.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
+      },
+      {
+        "tag": "geosite-instagram",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/instagram.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
+      },
+      {
+        "tag": "geosite-tiktok",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/tiktok.srs",
+        "update_interval": "24h",
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       }
     ],
     "rules": [
@@ -331,6 +373,14 @@
           ".copilot.microsoft.com"
         ],
         "outbound": "💬 ChatGPT"
+      },
+      {
+        "rule_set": [
+          "geosite-facebook",
+          "geosite-instagram",
+          "geosite-tiktok"
+        ],
+        "outbound": "📱 社交媒体"
       },
       {
         "rule_set": "geosite-telegram",
