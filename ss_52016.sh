@@ -9,9 +9,17 @@ BIN='/usr/local/bin/ssserver'
 CONF_DIR='/etc/shadowsocks-rust'
 CONF_FILE="$CONF_DIR/config.json"
 SERVICE_FILE='/etc/systemd/system/shadowsocks-rust.service'
+OPENRC_FILE='/etc/init.d/shadowsocks-rust'
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo '请使用 root 权限运行'; exit 1; }
-command -v systemctl >/dev/null 2>&1 || { echo '仅支持使用 systemd 的 Linux'; exit 1; }
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+  INIT_SYSTEM='systemd'
+elif command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then
+  INIT_SYSTEM='openrc'
+else
+  echo '不支持的服务管理器（需要 systemd 或 OpenRC）'
+  exit 1
+fi
 
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update -y
@@ -20,6 +28,8 @@ elif command -v dnf >/dev/null 2>&1; then
   dnf install -y curl xz ca-certificates
 elif command -v yum >/dev/null 2>&1; then
   yum install -y curl xz ca-certificates
+elif command -v apk >/dev/null 2>&1; then
+  apk add --no-cache curl xz ca-certificates
 else
   echo '不支持的包管理器（需要 apt、dnf 或 yum）'
   exit 1
@@ -61,6 +71,7 @@ cat >"$CONF_FILE" <<EOF
 EOF
 chmod 600 "$CONF_FILE"
 
+if [[ $INIT_SYSTEM == 'systemd' ]]; then
 cat >"$SERVICE_FILE" <<'EOF'
 [Unit]
 Description=Shadowsocks-Rust Server
@@ -77,23 +88,47 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
+else
+cat >"$OPENRC_FILE" <<'EOF'
+#!/sbin/openrc-run
+name="Shadowsocks-Rust Server"
+command="/usr/local/bin/ssserver"
+command_args="-c /etc/shadowsocks-rust/config.json"
+command_background="yes"
+pidfile="/run/shadowsocks-rust.pid"
+
+depend() {
+  need net
+}
+EOF
+chmod 755 "$OPENRC_FILE"
+fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
   ufw allow "$PORT/tcp"
   ufw allow "$PORT/udp"
 fi
-if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
   firewall-cmd --permanent --add-port="$PORT/tcp"
   firewall-cmd --permanent --add-port="$PORT/udp"
   firewall-cmd --reload
 fi
 
-systemctl daemon-reload
-systemctl enable --now shadowsocks-rust
-systemctl is-active --quiet shadowsocks-rust || {
-  journalctl -u shadowsocks-rust --no-pager -n 30
-  exit 1
-}
+if [[ $INIT_SYSTEM == 'systemd' ]]; then
+  systemctl daemon-reload
+  systemctl enable --now shadowsocks-rust
+  systemctl is-active --quiet shadowsocks-rust || {
+    journalctl -u shadowsocks-rust --no-pager -n 30
+    exit 1
+  }
+else
+  rc-update add shadowsocks-rust default >/dev/null
+  rc-service shadowsocks-rust restart
+  rc-service shadowsocks-rust status >/dev/null 2>&1 || {
+    echo '服务启动失败'
+    exit 1
+  }
+fi
 
 echo
 echo '安装完成：'
