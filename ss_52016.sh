@@ -40,7 +40,7 @@ install -m755 "$T/ssserver" "$BIN"
 
 mkdir -p "$(dirname "$CONF")"
 cat > "$CONF" <<EOF
-{"server":"0.0.0.0","server_port":$PORT,"password":"$PASS","method":"aes-128-gcm","mode":"tcp_and_udp"}
+{"server":"::","server_port":$PORT,"password":"$PASS","method":"aes-128-gcm","mode":"tcp_and_udp"}
 EOF
 chmod 600 "$CONF"
 
