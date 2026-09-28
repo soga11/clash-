@@ -42,6 +42,20 @@
         "server": "local"
       },
       {
+        "domain": [
+          "identity.apple.com"
+        ],
+        "domain_suffix": [
+          "push.apple.com",
+          "akadns.net"
+        ],
+        "domain_keyword": [
+          "apple.com.edgekey.net"
+        ],
+        "action": "route",
+        "server": "local"
+      },
+      {
         "query_type": [
           "A",
           "AAAA"
@@ -129,10 +143,22 @@
       "tag": "📲 电报消息",
       "type": "selector",
       "outbounds": [
+        "jj",
         "🇭🇰 香港负载",
         "🛡️ 去广告",
         "🚀 节点选择",
         "👋 手动选择"
+      ]
+    },
+    {
+      "tag": "🍏 苹果推送",
+      "type": "selector",
+      "outbounds": [
+        "jj",
+        "🇨🇳 台湾负载",
+        "🇭🇰 香港负载",
+        "🚀 节点选择",
+        "DIRECT"
       ]
     },
     {
@@ -162,7 +188,7 @@
       "outbounds": [],
       "filter": "电视",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
+      "interval": "30m",
       "tolerance": 100
     },
     {
@@ -171,7 +197,7 @@
       "outbounds": [],
       "filter": "台湾",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
+      "interval": "30m",
       "tolerance": 100
     },
     {
@@ -180,7 +206,7 @@
       "outbounds": [],
       "filter": "jj",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
+      "interval": "30m",
       "tolerance": 100
     },
     {
@@ -189,7 +215,7 @@
       "outbounds": [],
       "filter": "去广告",
       "url": "http://cp.cloudflare.com/generate_204",
-      "interval": "15m",
+      "interval": "30m",
       "tolerance": 100
     },
     {
@@ -438,6 +464,31 @@
         "rule_set": "geosite-google",
         "action": "route",
         "outbound": "🚀 节点选择"
+      },
+      {
+        "domain": [
+          "identity.apple.com"
+        ],
+        "domain_suffix": [
+          "push.apple.com",
+          "akadns.net"
+        ],
+        "domain_keyword": [
+          "apple.com.edgekey.net"
+        ],
+        "ip_cidr": [
+          "17.249.0.0/16",
+          "17.252.0.0/16",
+          "17.57.144.0/22",
+          "17.188.128.0/18",
+          "17.188.20.0/23",
+          "2620:149:a44::/48",
+          "2403:300:a42::/48",
+          "2403:300:a51::/48",
+          "2a01:b740:a42::/48"
+        ],
+        "action": "route",
+        "outbound": "🍏 苹果推送"
       },
       {
         "rule_set": "geosite-apple",
