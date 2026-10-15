@@ -47,22 +47,11 @@
         "server": "local"
       },
       {
-        "ip_cidr": [
-          "223.5.5.5/32",
-          "211.138.240.100/32",
-          "211.138.245.180/32"
-        ],
         "domain_suffix": ["alidns.com"],
         "action": "route",
         "server": "local"
       },
       {
-        "ip_cidr": [
-          "8.8.8.8/32",
-          "8.8.4.4/32",
-          "2001:4860:4860::8888/128",
-          "2001:4860:4860::8844/128"
-        ],
         "domain_suffix": ["dns.google"],
         "action": "route",
         "server": "remote"
@@ -98,7 +87,7 @@
     },
     "clash_api": {
       "external_controller": "127.0.0.1:9090",
-      "secret": "请设置一个强密码"
+      "secret": "Aq112211!"
     }
   },
   "inbounds": [
