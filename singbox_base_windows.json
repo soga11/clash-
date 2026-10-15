@@ -87,7 +87,7 @@
     },
     "clash_api": {
       "external_controller": "127.0.0.1:9090",
-      "secret": "Aq112211!"
+      "secret": "请设置一个强密码"
     }
   },
   "inbounds": [
@@ -100,7 +100,6 @@
       ],
       "auto_route": true,
       "strict_route": true,
-      "stack": "mixed",
       "mtu": 9000
     }
   ],
@@ -303,10 +302,26 @@
         "http_client": { "detour": "🚀 节点选择" }
       },
       {
-        "tag": "geosite-category-ai-chat-!cn",
+        "tag": "geosite-openai",
         "type": "remote",
         "format": "binary",
-        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ai-chat-!cn.srs",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
+        "update_interval": "24h",
+        "http_client": { "detour": "🚀 节点选择" }
+      },
+      {
+        "tag": "geosite-anthropic",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/anthropic.srs",
+        "update_interval": "24h",
+        "http_client": { "detour": "🚀 节点选择" }
+      },
+      {
+        "tag": "geosite-google-gemini",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google-gemini.srs",
         "update_interval": "24h",
         "http_client": { "detour": "🚀 节点选择" }
       },
@@ -450,8 +465,17 @@
         "outbound": "📹 油管视频"
       },
       {
-        "rule_set": ["geosite-category-ai-chat-!cn"],
-        "domain_suffix": ["perplexity.ai", "copilot.microsoft.com"],
+        "rule_set": [
+          "geosite-openai",
+          "geosite-anthropic",
+          "geosite-google-gemini"
+        ],
+        "domain_suffix": [
+          "perplexity.ai",
+          "copilot.microsoft.com",
+          "grok.com",
+          "x.ai"
+        ],
         "action": "route",
         "outbound": "💬 ChatGPT"
       },
