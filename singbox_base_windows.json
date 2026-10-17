@@ -47,19 +47,30 @@
         "server": "local"
       },
       {
-        "domain_suffix": ["alidns.com"],
+        "domain_suffix": [
+          "alidns.com"
+        ],
         "action": "route",
         "server": "local"
       },
       {
-        "domain_suffix": ["dns.google"],
+        "domain_suffix": [
+          "dns.google"
+        ],
         "action": "route",
         "server": "remote"
       },
       {
-        "domain": ["identity.apple.com"],
-        "domain_suffix": ["push.apple.com", "akadns.net"],
-        "domain_keyword": ["apple.com.edgekey.net"],
+        "domain": [
+          "identity.apple.com"
+        ],
+        "domain_suffix": [
+          "push.apple.com",
+          "akadns.net"
+        ],
+        "domain_keyword": [
+          "apple.com.edgekey.net"
+        ],
         "action": "route",
         "server": "local"
       },
@@ -69,7 +80,10 @@
         "server": "remote"
       },
       {
-        "query_type": ["A", "AAAA"],
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
         "action": "route",
         "server": "fakeip",
         "rewrite_ttl": 1
@@ -87,7 +101,7 @@
     },
     "clash_api": {
       "external_controller": "127.0.0.1:19090",
-      "secret": "请设置一个强密码"
+      "secret": "Aq112211!"
     }
   },
   "inbounds": [
@@ -108,7 +122,7 @@
       "tag": "🚀 节点选择",
       "type": "selector",
       "outbounds": [
-        "jj",
+        "JJ",
         "🇨🇳 台湾负载",
         "🇭🇰 香港负载",
         "🛡️ 去广告",
@@ -132,7 +146,7 @@
       "type": "selector",
       "outbounds": [
         "🇨🇳 台湾负载",
-        "jj",
+        "JJ",
         "🇭🇰 香港负载",
         "🚀 节点选择",
         "👋 手动选择"
@@ -143,7 +157,7 @@
       "type": "selector",
       "outbounds": [
         "🇨🇳 台湾负载",
-        "jj",
+        "JJ",
         "🇭🇰 香港负载",
         "🚀 节点选择",
         "👋 手动选择"
@@ -153,7 +167,7 @@
       "tag": "📱 社交媒体",
       "type": "selector",
       "outbounds": [
-        "jj",
+        "JJ",
         "🇨🇳 台湾负载",
         "🇭🇰 香港负载",
         "🚀 节点选择",
@@ -165,7 +179,7 @@
       "type": "selector",
       "outbounds": [
         "🇭🇰 香港负载",
-        "jj",
+        "JJ",
         "🇨🇳 台湾负载",
         "🛡️ 去广告",
         "🚀 节点选择",
@@ -177,7 +191,7 @@
       "type": "selector",
       "outbounds": [
         "🇭🇰 香港负载",
-        "jj",
+        "JJ",
         "🇨🇳 台湾负载",
         "🚀 节点选择",
         "DIRECT"
@@ -186,22 +200,34 @@
     {
       "tag": "🍎 苹果服务",
       "type": "selector",
-      "outbounds": ["DIRECT", "🚀 节点选择"]
+      "outbounds": [
+        "DIRECT",
+        "🚀 节点选择"
+      ]
     },
     {
       "tag": "🛑 广告拦截",
       "type": "selector",
-      "outbounds": ["REJECT", "DIRECT"]
+      "outbounds": [
+        "REJECT",
+        "DIRECT"
+      ]
     },
     {
       "tag": "🌐 全球直连",
       "type": "selector",
-      "outbounds": ["DIRECT", "🚀 节点选择"]
+      "outbounds": [
+        "DIRECT",
+        "🚀 节点选择"
+      ]
     },
     {
       "tag": "🐟 漏网之鱼",
       "type": "selector",
-      "outbounds": ["🚀 节点选择", "DIRECT"]
+      "outbounds": [
+        "🚀 节点选择",
+        "DIRECT"
+      ]
     },
     {
       "tag": "👋 手动选择",
@@ -228,7 +254,7 @@
       "tolerance": 50
     },
     {
-      "tag": "jj",
+      "tag": "JJ",
       "type": "urltest",
       "outbounds": [],
       "filter": "jj",
@@ -267,7 +293,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-cn",
@@ -275,7 +303,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-private",
@@ -283,7 +313,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/private.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-geolocation-!cn",
@@ -291,7 +323,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/geolocation-!cn.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-category-ads-all",
@@ -299,7 +333,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-openai",
@@ -307,7 +343,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/openai.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-anthropic",
@@ -315,7 +353,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/anthropic.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-google-gemini",
@@ -323,7 +363,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google-gemini.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-youtube",
@@ -331,7 +373,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/youtube.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-netflix",
@@ -339,7 +383,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/netflix.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geoip-netflix",
@@ -347,7 +393,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/netflix.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-telegram",
@@ -355,7 +403,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/telegram.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-facebook",
@@ -363,7 +413,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/facebook.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-instagram",
@@ -371,7 +423,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/instagram.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-tiktok",
@@ -379,7 +433,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/tiktok.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-google",
@@ -387,7 +443,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/google.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       },
       {
         "tag": "geosite-apple",
@@ -395,7 +453,9 @@
         "format": "binary",
         "url": "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/apple.srs",
         "update_interval": "24h",
-        "http_client": { "detour": "🚀 节点选择" }
+        "http_client": {
+          "detour": "🚀 节点选择"
+        }
       }
     ],
     "rules": [
@@ -417,7 +477,9 @@
         "outbound": "🚀 节点选择"
       },
       {
-        "rule_set": ["geosite-private"],
+        "rule_set": [
+          "geosite-private"
+        ],
         "ip_is_private": true,
         "action": "route",
         "outbound": "🌐 全球直连"
@@ -428,7 +490,9 @@
           "211.138.240.100/32",
           "211.138.245.180/32"
         ],
-        "domain_suffix": ["alidns.com"],
+        "domain_suffix": [
+          "alidns.com"
+        ],
         "action": "route",
         "outbound": "🌐 全球直连"
       },
@@ -439,12 +503,16 @@
           "2001:4860:4860::8888/128",
           "2001:4860:4860::8844/128"
         ],
-        "domain_suffix": ["dns.google"],
+        "domain_suffix": [
+          "dns.google"
+        ],
         "action": "route",
         "outbound": "🚀 节点选择"
       },
       {
-        "rule_set": ["geosite-category-ads-all"],
+        "rule_set": [
+          "geosite-category-ads-all"
+        ],
         "action": "route",
         "outbound": "🛑 广告拦截"
       },
@@ -460,7 +528,9 @@
         "outbound": "DIRECT"
       },
       {
-        "rule_set": ["geosite-youtube"],
+        "rule_set": [
+          "geosite-youtube"
+        ],
         "action": "route",
         "outbound": "📹 油管视频"
       },
@@ -480,7 +550,10 @@
         "outbound": "💬 ChatGPT"
       },
       {
-        "rule_set": ["geosite-netflix", "geoip-netflix"],
+        "rule_set": [
+          "geosite-netflix",
+          "geoip-netflix"
+        ],
         "action": "route",
         "outbound": "🎬 奈飞视频"
       },
@@ -494,14 +567,23 @@
         "outbound": "📱 社交媒体"
       },
       {
-        "rule_set": ["geosite-telegram"],
+        "rule_set": [
+          "geosite-telegram"
+        ],
         "action": "route",
         "outbound": "📲 电报消息"
       },
       {
-        "domain": ["identity.apple.com"],
-        "domain_suffix": ["push.apple.com", "akadns.net"],
-        "domain_keyword": ["apple.com.edgekey.net"],
+        "domain": [
+          "identity.apple.com"
+        ],
+        "domain_suffix": [
+          "push.apple.com",
+          "akadns.net"
+        ],
+        "domain_keyword": [
+          "apple.com.edgekey.net"
+        ],
         "ip_cidr": [
           "17.249.0.0/16",
           "17.252.0.0/16",
@@ -517,17 +599,23 @@
         "outbound": "🍏 苹果推送"
       },
       {
-        "rule_set": ["geosite-google"],
+        "rule_set": [
+          "geosite-google"
+        ],
         "action": "route",
         "outbound": "🚀 节点选择"
       },
       {
-        "rule_set": ["geosite-apple"],
+        "rule_set": [
+          "geosite-apple"
+        ],
         "action": "route",
         "outbound": "🍎 苹果服务"
       },
       {
-        "rule_set": ["geosite-cn"],
+        "rule_set": [
+          "geosite-cn"
+        ],
         "action": "route",
         "outbound": "🌐 全球直连"
       },
@@ -536,7 +624,9 @@
         "strategy": "prefer_ipv4"
       },
       {
-        "rule_set": ["geoip-cn"],
+        "rule_set": [
+          "geoip-cn"
+        ],
         "action": "route",
         "outbound": "🌐 全球直连"
       }
